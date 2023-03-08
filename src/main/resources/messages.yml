@@ -1,0 +1,140 @@
+######### Accion MfB Customer Microservice ############
+---
+appMessages:
+  insufficient:
+    balance: Insufficient balance
+  user:
+    notexist: The request is from an unknown user {0}
+  account:
+    notexist: No account record found for the account number {0}
+    failed: Your airtime purchase failed
+    fallback: Unable to complete airtime purchase at this moment. Service will be back shortly - {0}
+    noprimary: Unable determine debit account for the transaction. Ensure primary account is set for the customer
+    notsavebrighta: The account type is not allowed for this transaction. Kindly use a Save Brighta account
+    insufficientbalance: Your account balance is not up to the required {0} contribution.
+    insufficientbalancemissed: Your account balance is not sufficient for all missed goals.
+    service:
+      unavailable: The account service is unavailable. Please try again shortly. Thank you.
+    inactive: The account by account number {0} is not active.
+  data:
+    success: Your data subscription was successful
+    failed: Your data subscription was failed
+    fallback: Unable to complete data purchase at this moment. Service will be back shortly - {0}
+  request:
+    processing: Your request is processing. Do not repeat without a check
+    hash:
+      failed: Bad request. The hash failed.
+    sameid: A request with the requestID {0} is already made. Try with a different requestId.
+    norole: You do not have permission to use this resource
+    invalidtoken: Invalid authorization token.
+  customer:
+    account:
+      mismatch: The account number {0} belongs to another customer
+    number:
+      mismatch: The customer number {0} belongs to another customer
+      missing: The customer number (CIF) for {0} is missing. Kindly update customer record
+    exist: A customer with same mobile number {0} already exist
+    noexist: No customer record found using the mobile number {0}
+    inactive: Customer record with mobile number {0} is inactive
+    update:
+      success: Customer status updated successfully
+    kyc2:
+      upgrade:
+        success: Customer upgraded to Tier 2 successfully
+    kyc3:
+      upgrade:
+        success: Customer upgraded to Tier 3 successfully
+      reach: Customer with mobile number {0} is already on Tier 3
+    mobile:
+      number:
+        exist: A customer with the mobile number {0} already exist on Omni
+    boarded:
+      already: A customer with the mobile number {0} already boarded
+      success: Congratulations! Customer boarded successfully
+    bvn:
+      name:
+        mismatch: The names {0} in customer does not match {1} from BVN
+      number:
+        mismatch: The mobile number {0} does not match the one in the BVN
+    service:
+      unavailable: The customer service is unavailable. Please try again shortly.
+  branch:
+    noexist: No branch record exist with the branch code {0}
+  model:
+    failed: Failed to persis model {0} to the DB
+  identity:
+    format:
+      voilation: ID format voilation. Expects ID of value like {0}
+  mismatch:
+    pin: The {0} supplied is invalid for {1} number {2}
+    security:
+      answer: Wrong answer to the security question for mobile number {0}
+    fingerprint: The fingerprint supplied is invalid for the mobile number {0}
+  login:
+    success: Your login was successful
+    channel:
+      unknown: Request is from an unknown channel {0}
+  fallback:
+    callback: Unable to process customer request at this moment. Service will be back shortly - {0}
+  bvn:
+    mobile:
+      mismatch: The mobile number {0} does not match the BVN record {1}
+  otp:
+    sent: An OTP has been sent to {0}. OTP expires in {1} min
+    invalid: The OTP {0} is invalid. Enter a valid OTP
+    expired: The OTP {0} is expired.
+    valid: The OTP is valid
+  posting:
+    restriction:
+      success: The following restriction(s) {0} have been applied to your account
+      failed: The following restriction(s) have been removed from your account
+      none: No current posting restriction to remove for customer number {0}
+  pan:
+    success: The PAN {0} already issued
+    norecord: The PAN {0} does not exist
+    blocked: The PAN {0} is blocked successfully
+    notexist: No PAN exist for the CIF {0}
+  target:
+    savings:
+      weekend: Your start date cannot be on a weekend. Kindly choose another start date
+      nold: Target Savings reference like LD..... missing
+      maxdays: Your start date cannot be greater than {0}
+      pastdays: Your start date cannot be back dated.
+      exist: You have a target savings with the goal name {0} for account {1} already
+      notexist: No Target Savings or Schedule record found matching id {0}
+      notexistname: No Target Savings or Schedule record found matching the goal name {0}
+      executed: The Schedule with id {0} has been executed or terminated already
+      terminated: The Goal Setting with id {0} terminated already
+      terminatedname : The Goal Setting with name {0} terminated already
+      terminatedid: The Goal Setting with targetSavingsId {0} terminated already.
+      earliest:
+        termination: Earliest Termination date for the Target Savings is {0}
+      invalid:
+        quarter: Quarterly contribution requires a tenor of 3, 6, 9 or 12 months
+        contribution: Expected total savings of N{0} less than the target amount N{1}. Increase your savings or reduce your target amount
+      insufficient:
+        savings: You have not saved enough to terminate. You have N{0} savings
+      parent:
+        terminated: The parent Target Savings terminated already
+      schedule:
+        notexist: Unable to determine contribution start date. All contribution schedule executed already
+      same:
+        amount: Your new Target Amount or Savings Amount is same as the current one
+      contribution:
+        success: Your contribution was successful
+      amount:
+        required: The {0} contribution requires a minimum of N{1} as amount
+      tier:
+        exceeded: The contribution amount of {0} will exceed tier {1} transaction limit
+      nameandidmissing: Both targetSavingsId and goalName cannot be empty. Enter one of targetSavingsId or goalName.
+      nomissedgoal: There is no missed goal for the target savings with name {0}. It is either the missed goal has exceeded the executable grace of {1} days, or you have never missed a goal schedule!
+      nameandidpresent: Only one of goalName or targetSavingsId should be provided.
+      accountnumbermissingforgoalname: Account number must be specified for goal name.
+
+  funds:
+    service:
+      unavailable: The funds transfer service is currently unavailable. Please try again later.
+
+  notification:
+    service:
+      unavailable: The SMS service is currently unavailable. Please try again.

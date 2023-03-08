@@ -1,0 +1,35 @@
+server:
+  port: 1016
+
+spring:
+  application:
+    name: omnix-savings
+  cloud:
+    config:
+      uri: http://omnix-config:8888
+      name: config-server
+  main:
+    allow-circular-references: true
+  tasK:
+    scheduling:
+      pool:
+        size: 3
+
+eureka:
+  client:
+    registerWithEureka: true
+    fetchRegistry: true
+
+targetSavings:
+  contribution:
+    minimum:
+      daily: 250.00
+      weekly: 500.00
+      monthly: 1000.00
+  interestRate:
+    lessOrThreeMonth: 5.5
+    fourToSixMonth: 7.0
+    sevenToNine: 8.5
+    tenToTwelve: 10.0
+  missed:
+    graceInDays: 4
