@@ -9,6 +9,8 @@ public class ApiPaths
     //C
     public static final String CUSTOMER_DETAILS = "/details";
 
+    public static final String HEADER_STRING = "Authorization";
+
     // T
     public static final String TOKEN_PREFIX = "Bearer";
     public static final String TARGET_SAVINGS_SET = "/goal/set";
@@ -24,4 +26,7 @@ public class ApiPaths
     public static final String TARGET_SAVINGS_UPDATE = "/goal/update";
     public static final String TARGET_SAVINGS_INTEREST_SIMULATOR = "/goal/interest/simulate";
 
+
+    // PROXY
+    public static final String PROXY_CONTROLLER_BASE_URL = "/proxy";
 }
