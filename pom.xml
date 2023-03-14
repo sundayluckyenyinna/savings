@@ -138,39 +138,21 @@
         </dependencies>
     </dependencyManagement>
 
-    <build>
-        <finalName>savings-1.1.0</finalName>
-        <pluginManagement>
-            <plugins>
-                <plugin>
-                    <groupId>org.springframework.boot</groupId>
-                    <artifactId>spring-boot-maven-plugin</artifactId>
-<!--                    <configuration>-->
-<!--                        <mainClass>com.accionmfb.omnix.savings.SavingsApplication</mainClass>-->
-<!--                        <excludes>-->
-<!--                            <exclude>-->
-<!--                                <groupId>org.projectlombok</groupId>-->
-<!--                                <artifactId>lombok</artifactId>-->
-<!--                            </exclude>-->
-<!--                            <archive>-->
-<!--                                <manifest>-->
-<!--                              <addClassPath>true</addClassPath>-->
-<!--                                    <mainClass>com.accionmfb.omnix.savings.SavingsApplication</mainClass>-->
-<!--                                </manifest>-->
-<!--                            </archive>-->
-<!--                        </excludes>-->
-<!--                    </configuration>-->
-                    <executions>
-                        <execution>
-                            <goals>
-                                <goal>repackage</goal>
-                            </goals>
-                        </execution>
-                    </executions>
-                </plugin>
-            </plugins>
-        </pluginManagement>
-
+     <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+        </plugins>
     </build>
 
 </project>

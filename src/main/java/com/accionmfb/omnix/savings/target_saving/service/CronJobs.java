@@ -78,8 +78,8 @@ public class CronJobs
 
 
     /**
-     * The cron Job to handle the automatic execution of pending target saving goals.
-     * This cron job is triggered at every 24 hours the server is up and running every day.
+     * The scheduler Job to handle the automatic execution of pending target saving goals.
+     * This scheduler job is triggered at every 24 hours the server is up and running every day.
      */
     @Async
     @Scheduled(fixedDelay = 24 * 60 * 60 * 1000, initialDelay = 1000)
@@ -142,6 +142,7 @@ public class CronJobs
         System.out.println("Scheduler done for today...");
     }
 
+    
     private void
     executeSMSDue(List<TargetSavingSchedule> schedules, Map<String, AccountDetailsResponsePayload> map, String token) {
 
@@ -162,9 +163,6 @@ public class CronJobs
                             getAccountDetailsForSchedule(schedule, map);
 
                     String accountResponseCode = accountDetails.getResponseCode();
-
-                    // Log out the details
-                    System.out.println("Account details: " + gson.toJson(accountDetails));
 
                     if(!accountResponseCode
                             .equalsIgnoreCase(SUCCESS_CODE.getResponseCode()))
@@ -208,6 +206,7 @@ public class CronJobs
 
                 });
     }
+    
 
     private void
     executeScheduleQueue(List<TargetSavingSchedule> scheduleQueue, Map<String, AccountDetailsResponsePayload> map, String token) {
@@ -228,7 +227,7 @@ public class CronJobs
 
                     String prefix = "Funds transfer failure: ";
 
-                    // If the operation succeeds, set the status of the target savings.
+                    // If the operation succeeds, set the status of the target savings and handle success.
                     String responseCode = response.getResponseCode();
                     if(responseCode.equalsIgnoreCase(SUCCESS_CODE.getResponseCode())){
                         FundsTransferResponsePayload fundsPayload =
@@ -236,6 +235,9 @@ public class CronJobs
 
                         String customerMobile = fundsPayload.getMobileNumber();
                         String transactionRef = fundsPayload.getTransRef();
+                        schedule.setStatus(SUCCESS.name());
+                        schedule.setFailureReason(Strings.EMPTY);
+                        targetSavingsRepository.updateTargetSavingSchedule(schedule);
                         handleSuccessfulExecutionOfSchedule(schedule, customerMobile, transactionRef, token);
                     }
 
@@ -258,7 +260,7 @@ public class CronJobs
 
 
     /**
-     * This method runs in a cron job. It automatically executes the target savings that are due to be terminated.
+     * This method runs in a scheduler job. It automatically executes the target savings that are due to be terminated.
      * The termination condition is such that:
      * 1) The due date of the target savings goal has expired.
      * @param targetSavingsList: List<TargetSavings>
@@ -283,6 +285,7 @@ public class CronJobs
                     .collect(Collectors.toList());
 
             targetSavings.forEach(targetSaving -> {
+                
                 // Create the termination request.
                 TargetSavingTerminationRequestPayload requestPayload = new TargetSavingTerminationRequestPayload();
                 requestPayload.setAccountNumber(accountNumber);
@@ -295,8 +298,13 @@ public class CronJobs
                 Response response = terminateDueTargetSavings(requestPayload, token);
                 if (response instanceof ErrorResponse || !response.getResponseCode().equalsIgnoreCase(SUCCESS_CODE.getResponseCode())) {
                     targetSaving.setFailureReason("Termination Failure: ".concat(response.getResponseMessage()));
+                    targetSaving.setStatus(FAILED.name());
+                    targetSavingsRepository.updateTargetSavings(targetSaving);
                 } else {
                     genericService.generateLog("Target Saving Scheduler", token, "Target saving goal terminated successfully", "INFO", "SEVERE", requestPayload.getRequestId());
+                    targetSaving.setStatus(TERMINATED.name());
+                    targetSaving.setFailureReason(Strings.EMPTY);
+                    targetSavingsRepository.updateTargetSavings(targetSaving);
                 }
 
             });
@@ -307,13 +315,13 @@ public class CronJobs
 
     private Map<String, AccountDetailsResponsePayload>
     getAllCustomersAccountDetailsForTargetSavings(List<TargetSavings> targetSavingsList, String token) {
-        // Create a map of all the target savings and the respective account details
+        
+        // Create a map of all the target savings and their respective account details.
         Map<String, AccountDetailsResponsePayload> accountDetails = new HashMap<>();
 
         // Create a set to hold all distinct account numbers.
         Set<String> accountNumberSet = new TreeSet<>();
-        targetSavingsList
-                .forEach(targetSavings -> accountNumberSet.add(targetSavings.getAccountNumber()));
+        targetSavingsList.forEach(targetSavings -> accountNumberSet.add(targetSavings.getAccountNumber()));
 
         List<String> distinctAccountNumberList = accountNumberSet.stream().collect(Collectors.toList());
 
@@ -328,8 +336,7 @@ public class CronJobs
             String hash = genericService.encryptPayloadToString(accountRequest, token);
             accountRequest.setHash(hash);
 
-            AccountDetailsResponsePayload details = externalService
-                    .getAccountDetailsFromAccountService(accountRequest, token);
+            AccountDetailsResponsePayload details = externalService.getAccountDetailsFromAccountService(accountRequest, token);
 
             accountDetails.put(accountNumber, details);
         }
@@ -429,11 +436,13 @@ public class CronJobs
             String prefix = "Termination failure: ";
             TargetSavings targetSavings = schedule.getTargetSavings();
             targetSavings.setFailureReason(prefix + response1.getResponseMessage());
+            targetSavings.setStatus(FAILED.name());
             targetSavingsRepository.updateTargetSavings(targetSavings);
         }
 
     }
 
+    
     /**
      * This method updates the status of the schedule after the SMS. This method should be called
      * after funds transfer and termination of the parent target savings goal. Here the target savings
@@ -444,8 +453,8 @@ public class CronJobs
      * @param response : Response
      */
     private void handleScheduleAfterSMS(TargetSavingSchedule schedule, Response response, String percent) {
+        
         String prefix = "SMS failure: ";
-        schedule.setStatus(TargetSavingStatus.SUCCESS.name());
         if (response instanceof ErrorResponse){
             String message = prefix + response.getResponseMessage();
             schedule.setFailureReason(message);
