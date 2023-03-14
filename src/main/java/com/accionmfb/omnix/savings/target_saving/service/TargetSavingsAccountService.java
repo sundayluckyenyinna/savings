@@ -100,12 +100,9 @@ public class TargetSavingsAccountService
         // Create a list of all the target savings goal for the client
         List<TargetSavingsResponsePayload> responsePayloadList = new ArrayList<>();
 
-        List<TargetSavings> targetSavings = targetSavingsRepository
-                .findAllTargetSavingsByAccountNumber(accountNumber);
-
+        List<TargetSavings> targetSavings = targetSavingsRepository.findAllTargetSavingsByAccountNumber(accountNumber);
 
         targetSavings
-                .stream()
                 .forEach(targetSaving -> responsePayloadList
                         .add(createTargetSavingsResponsePayloadFromTargetSavings
                                 (targetSaving, accountDetails, customerDetails)));

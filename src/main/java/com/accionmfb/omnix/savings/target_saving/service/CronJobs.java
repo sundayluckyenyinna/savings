@@ -323,7 +323,7 @@ public class CronJobs
         Set<String> accountNumberSet = new TreeSet<>();
         targetSavingsList.forEach(targetSavings -> accountNumberSet.add(targetSavings.getAccountNumber()));
 
-        List<String> distinctAccountNumberList = accountNumberSet.stream().collect(Collectors.toList());
+        List<String> distinctAccountNumberList = new ArrayList<>(accountNumberSet);
 
         for(int i = 0; i < accountNumberSet.size(); i++){
 
@@ -865,7 +865,7 @@ public class CronJobs
         // Create a set to hold the unique account numbers
         Set<String> accountNumbers = new TreeSet<>();
 
-        allTargetSavings.stream().forEach(targetSavings -> {
+        allTargetSavings.forEach(targetSavings -> {
             accountNumbers.add(targetSavings.getAccountNumber());
         });
 
@@ -873,7 +873,7 @@ public class CronJobs
 
         // For each of the unique account numbers, get all the target savings associated with it
         Map<String, List<TargetSavings>> result = new HashMap<>();
-        uniqueAccountNumbers.stream()
+        uniqueAccountNumbers
                 .forEach(accountNumber -> {
                     List<TargetSavings> targetSavingsListForAccountNumber = targetSavingsRepository
                             .findAllTargetSavingsByAccountNumber(accountNumber);
