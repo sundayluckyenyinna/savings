@@ -63,4 +63,23 @@ public class TargetSavingSchedule
     @Column(name = "failure_reason")
     private String failureReason;
 
+    @Override
+    public String toString() {
+        return "TargetSavingSchedule{" +
+                "id=" + id +
+                ", createdAt=" + createdAt +
+                ", dueAt=" + dueAt +
+                ", executedAt=" + executedAt +
+                ", debitAccount='" + debitAccount + '\'' +
+                ", creditAccount='" + creditAccount + '\'' +
+                ", t24TransRef='" + t24TransRef + '\'' +
+                ", amount='" + amount + '\'' +
+                ", smsDueDate=" + smsDueDate +
+                ", smsDueSend=" + smsDueSend +
+                ", targetSavings=" + targetSavings +
+                ", timePeriod=" + timePeriod +
+                ", status='" + status + '\'' +
+                ", failureReason='" + failureReason + '\'' +
+                '}';
+    }
 }

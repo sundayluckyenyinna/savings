@@ -56,4 +56,6 @@ public class SMSRequestPayload
     @NotBlank(message = "Token cannot be blank")
     private String token;
 
+    private String imei;
+
 }

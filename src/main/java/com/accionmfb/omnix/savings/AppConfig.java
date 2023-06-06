@@ -30,6 +30,12 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.servlet.config.annotation.EnableWebMvc;
+import springfox.documentation.builders.ApiInfoBuilder;
+import springfox.documentation.builders.PathSelectors;
+import springfox.documentation.builders.RequestHandlerSelectors;
+import springfox.documentation.service.ApiInfo;
+import springfox.documentation.spi.DocumentationType;
+import springfox.documentation.spring.web.plugins.Docket;
 
 import javax.persistence.EntityManagerFactory;
 import javax.sql.DataSource;
@@ -122,7 +128,6 @@ public class AppConfig {
         config.setProviderName("SunJCE");
         config.setSaltGeneratorClassName("org.jasypt.salt.RandomSaltGenerator");
         config.setStringOutputType("base64");
-
         encryptor.setConfig(config);
         return encryptor;
     }
@@ -136,6 +141,26 @@ public class AppConfig {
     @Bean
     public RestTemplate restTemplate(){
         return new RestTemplate();
+    }
+
+    @Bean
+    public Docket api() {
+        return new Docket(DocumentationType.OAS_30)
+                .select()
+                .apis(RequestHandlerSelectors.basePackage("com.accionmfb.omnix.savings.target_saving.controller"))
+                .paths(PathSelectors.any())
+                .build()
+                .apiInfo(apiInfo());
+    }
+
+    private ApiInfo apiInfo() {
+        return new ApiInfoBuilder()
+                .title("Savings Microservice API")
+                .description("Complete REST Savings Service middleware microservice API consumable by web clients")
+                .license("MIT License")
+                .version("1.1.0")
+                .licenseUrl("https://opensource.org/licenses/MIT")
+                .build();
     }
 
 }

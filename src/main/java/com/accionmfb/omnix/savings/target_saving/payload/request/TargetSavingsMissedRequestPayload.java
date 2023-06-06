@@ -21,12 +21,12 @@ public class TargetSavingsMissedRequestPayload
 
     private String accountNumber;
 
-    //    @NotBlank(message = "Hash value is required")
-//    @Schema(name = "Hash value", example = "OBA67XXTY78999GHTRE", description = "Encrypted hash value is required")
     private String hash;
 
     @NotNull(message = "Request id cannot be null")
     @NotEmpty(message = "Request id cannot be empty")
     @NotBlank(message = "Request id cannot be blank")
     private String requestId;
+
+    private String imei;
 }

@@ -1,8 +1,14 @@
 package com.accionmfb.omnix.savings.target_saving.service;
 
 import com.accionmfb.omnix.savings.target_saving.constant.Constants;
+import com.accionmfb.omnix.savings.target_saving.dto.CurrentDateTime;
 import com.accionmfb.omnix.savings.target_saving.jwt.JwtTokenUtil;
 import com.accionmfb.omnix.savings.target_saving.payload.request.*;
+import com.google.gson.Gson;
+import kong.unirest.HttpResponse;
+import kong.unirest.Unirest;
+import kong.unirest.UnirestException;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.util.Strings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +32,7 @@ import java.util.stream.Collectors;
 /**
  * This provides the core implementation of the Generic service interface.
  */
+@Slf4j
 @Service
 public class GenericServiceImpl implements GenericService
 {
@@ -37,6 +44,9 @@ public class GenericServiceImpl implements GenericService
 
     @Autowired
     private MessageSource messageSource;
+
+    @Value("${time.url}")
+    private String timeUrl;
 
     @Value("${omnix.start.morning}")
     private String startMorning;
@@ -54,6 +64,8 @@ public class GenericServiceImpl implements GenericService
     private String startNight;
     @Value("${omnix.end.night}")
     private String endNight;
+
+    private static final Gson gson = new Gson();
 
     Logger logger = LoggerFactory.getLogger(GenericServiceImpl.class);
 
@@ -114,7 +126,8 @@ public class GenericServiceImpl implements GenericService
         String concatValues = Arrays.stream(fields)
                 .filter(field -> !field.getName().equalsIgnoreCase("hash"))
                 .filter(field -> !field.getName().equalsIgnoreCase("token"))
-                .filter(field -> !field.getName().equalsIgnoreCase("smsType")) // for SMS payload
+                .filter(field -> !field.getName().equalsIgnoreCase("smsType"))
+                .filter(field -> !field.getName().equalsIgnoreCase("imei"))// for SMS payload
                 .map(field -> {
                     field.setAccessible(true);
                     String fieldValue = Strings.EMPTY;
@@ -254,7 +267,7 @@ public class GenericServiceImpl implements GenericService
     {
         double[] response = {0, 0};
         try {
-            double rate = Double.valueOf(interestRate) / 100;
+            double rate = Double.parseDouble(interestRate) / 100;
             double rateByTime = 0D;
             double rateByTimePlusOne = 0D;
             double rateByTimeExponential = 0D;
@@ -266,49 +279,49 @@ public class GenericServiceImpl implements GenericService
             double dailyInterest = 0D;
             if (frequency.equalsIgnoreCase("Monthly")) {
                 rateByTime = rate / 12;
-                totalContribution = Double.valueOf(contributionAmount) * Double.valueOf(tenor);
+                totalContribution = Double.parseDouble(contributionAmount) * Double.parseDouble(tenor);
             } else if (frequency.equalsIgnoreCase("Weekly")) {
                 rateByTime = rate / 52;
-                totalContribution = Double.valueOf(contributionAmount) * Double.valueOf(tenor) * 4; // Assume 4weeks;
+                totalContribution = Double.parseDouble(contributionAmount) * Double.parseDouble(tenor) * 4; // Assume 4weeks;
             } else {
                 rateByTime = rate / 365;
-                totalContribution = Double.valueOf(contributionAmount) * Double.valueOf(tenor) * 30;  //Assume 30 days
+                totalContribution = Double.parseDouble(contributionAmount) * Double.parseDouble(tenor) * 30;  //Assume 30 days
             }
 
             rateByTimePlusOne = rateByTime + 1;
             if (frequency.equalsIgnoreCase("Monthly")) {
-                rateByTimeExponential = Math.pow(rateByTimePlusOne, Double.valueOf(tenor));
+                rateByTimeExponential = Math.pow(rateByTimePlusOne, Double.parseDouble(tenor));
             } else if (frequency.equalsIgnoreCase("Weekly")) {
                 double n = 0;
-                if (Double.valueOf(tenor) == 3) {
-                    n = Double.valueOf(tenor) * 4D + 1; //3 months * 4 Weeks + 1 Week = 13 Weeks
-                } else if (Double.valueOf(tenor) == 6) {
-                    n = Double.valueOf(tenor) * 4D + 2; //6 months * 4 Weeks + 2 Week = 26 Weeks
-                } else if (Double.valueOf(tenor) == 9) {
-                    n = Double.valueOf(tenor) * 4D + 3; //9 months * 4 Weeks + 3 Week = 39 Weeks
-                } else if (Double.valueOf(tenor) == 12) {
-                    n = Double.valueOf(tenor) * 4D + 4; //12 months * 4 Weeks + 4 Week = 52 Weeks
+                if (Double.parseDouble(tenor) == 3) {
+                    n = Double.parseDouble(tenor) * 4D + 1; //3 months * 4 Weeks + 1 Week = 13 Weeks
+                } else if (Double.parseDouble(tenor) == 6) {
+                    n = Double.parseDouble(tenor) * 4D + 2; //6 months * 4 Weeks + 2 Week = 26 Weeks
+                } else if (Double.parseDouble(tenor) == 9) {
+                    n = Double.parseDouble(tenor) * 4D + 3; //9 months * 4 Weeks + 3 Week = 39 Weeks
+                } else if (Double.parseDouble(tenor) == 12) {
+                    n = Double.parseDouble(tenor) * 4D + 4; //12 months * 4 Weeks + 4 Week = 52 Weeks
                 }
                 rateByTimeExponential = Math.pow(rateByTimePlusOne, n);
             } else {
                 double n = 0;
-                if (Double.valueOf(tenor) == 3) {
-                    n = Double.valueOf(tenor) * 30D + 1; //3 months * 30 Days + 1 Day = 91 Days
-                } else if (Double.valueOf(tenor) == 6) {
-                    n = Double.valueOf(tenor) * 30D + 2; //6 months * 30 Days + 2 Days = 182 Days
-                } else if (Double.valueOf(tenor) == 9) {
-                    n = Double.valueOf(tenor) * 30D + 3; //9 months * 30 Days + 3 Days = 273 Days
-                } else if (Double.valueOf(tenor) == 12) {
-                    n = Double.valueOf(tenor) * 30D + 4; //12 months * 30 Days + 4 Days = 364 Days
+                if (Double.parseDouble(tenor) == 3) {
+                    n = Double.parseDouble(tenor) * 30D + 1; //3 months * 30 Days + 1 Day = 91 Days
+                } else if (Double.parseDouble(tenor) == 6) {
+                    n = Double.parseDouble(tenor) * 30D + 2; //6 months * 30 Days + 2 Days = 182 Days
+                } else if (Double.parseDouble(tenor) == 9) {
+                    n = Double.parseDouble(tenor) * 30D + 3; //9 months * 30 Days + 3 Days = 273 Days
+                } else if (Double.parseDouble(tenor) == 12) {
+                    n = Double.parseDouble(tenor) * 30D + 4; //12 months * 30 Days + 4 Days = 364 Days
                 }
                 rateByTimeExponential = Math.pow(rateByTimePlusOne, n);
             }
 
             rateByTimeExpoMinusOne = rateByTimeExponential - 1D;
             rateByTimeExpoDivide = rateByTimeExpoMinusOne / rateByTime;
-            futureValue = rateByTimeExpoDivide * Double.valueOf(contributionAmount);
+            futureValue = rateByTimeExpoDivide * Double.parseDouble(contributionAmount);
             totalInterest = futureValue - totalContribution;
-            dailyInterest = totalInterest / (Double.valueOf(tenor) * 30);
+            dailyInterest = totalInterest / (Double.parseDouble(tenor) * 30);
             response[0] = new BigDecimal(String.valueOf(totalInterest))
                     .setScale(15, RoundingMode.CEILING).doubleValue();
             response[1] = new BigDecimal(String.valueOf(dailyInterest))
@@ -330,6 +343,7 @@ public class GenericServiceImpl implements GenericService
         CustomerDetailsRequestPayload customerDetailsRequestPayload = new CustomerDetailsRequestPayload();
         customerDetailsRequestPayload.setMobileNumber(targetSavingsRequestPayload.getMobileNumber());
         customerDetailsRequestPayload.setRequestId(targetSavingsRequestPayload.getRequestId());
+        customerDetailsRequestPayload.setImei(targetSavingsRequestPayload.getImei());
         String hash = this.encryptPayloadToString(customerDetailsRequestPayload, token);
         customerDetailsRequestPayload.setHash(hash);
         return customerDetailsRequestPayload;
@@ -358,6 +372,7 @@ public class GenericServiceImpl implements GenericService
         AccountBalanceRequestPayload accountBalanceRequestPayload = new AccountBalanceRequestPayload();
         accountBalanceRequestPayload.setAccountNumber(requestPayload.getAccountNumber());
         accountBalanceRequestPayload.setRequestId(requestPayload.getRequestId());
+        accountBalanceRequestPayload.setImei(requestPayload.getImei());
         String hash = encryptPayloadToString(accountBalanceRequestPayload, token);
         accountBalanceRequestPayload.setHash(hash);
         return accountBalanceRequestPayload;
@@ -422,4 +437,29 @@ public class GenericServiceImpl implements GenericService
         }
     }
 
+    @Override
+    public LocalDateTime getCurrentDateTime() {
+        String response;
+        HttpResponse<String> httpResponse;
+        Unirest.config().verifySsl(false);
+        try{
+
+            log.info("Google Time Url: {}", timeUrl);
+
+            httpResponse = Unirest.get(timeUrl)
+                    .header("Content-Type", "application/json")
+                    .asString();
+            response = httpResponse.getBody();
+            CurrentDateTime currentDateTime = gson.fromJson(response, CurrentDateTime.class);
+            LocalDateTime dateTime = LocalDateTime.parse(currentDateTime.getDateTime());
+            log.info("Google current time retrieval success: {}", currentDateTime.toString());
+            log.info("Time gotten: {}", dateTime.toString());
+
+            return dateTime;
+        }
+        catch (UnirestException exception){
+            log.error("Error occurred while getting date-time from google. Reason: {}, Cause: {}", exception.getMessage(), exception.getCause().getMessage());
+            return LocalDateTime.now();
+        }
+    }
 }

@@ -9,6 +9,14 @@ public class ApiPaths
     //C
     public static final String CUSTOMER_DETAILS = "/details";
 
+
+    public static final String ACCOUNT_DETAILS_PROXY = "/proxy/details";
+
+    public static final String ACCOUNT_BALANCE_PROXY = "/proxy/balance";
+    //C
+    public static final String CUSTOMER_DETAILS_PROXY = "/proxy/details";
+
+
     public static final String HEADER_STRING = "Authorization";
 
     // T
@@ -26,6 +34,11 @@ public class ApiPaths
     public static final String TARGET_SAVINGS_UPDATE = "/goal/update";
     public static final String TARGET_SAVINGS_INTEREST_SIMULATOR = "/goal/interest/simulate";
 
+
+    // TRANSACTION SAVING
+    public static final String TRANSACTION_SAVING_SETUP = "/goal/transaction/save-update";
+    public static final String TRANSACTION_SAVING_SETUP_TERMINATE = "/goal/transaction/terminate";
+    public static final String TRANSACTION_SAVING_SETUP_LIST = "/goal/transaction";
 
     // PROXY
     public static final String PROXY_CONTROLLER_BASE_URL = "/proxy";

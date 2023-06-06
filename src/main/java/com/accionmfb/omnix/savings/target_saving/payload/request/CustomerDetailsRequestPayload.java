@@ -25,4 +25,7 @@ public class CustomerDetailsRequestPayload {
     @NotEmpty(message = "Request id cannot be empty")
     @NotBlank(message = "Request id cannot be blank")
     private String requestId;
+
+    private String imei;
+
 }

@@ -130,6 +130,7 @@ appMessages:
       nomissedgoal: There is no missed goal for the target savings with name {0}. It is either the missed goal has exceeded the executable grace of {1} days, or you have never missed a goal schedule!
       nameandidpresent: Only one of goalName or targetSavingsId should be provided.
       accountnumbermissingforgoalname: Account number must be specified for goal name.
+      late-start-day: The start date cannot be later than a month from now.
 
   funds:
     service:

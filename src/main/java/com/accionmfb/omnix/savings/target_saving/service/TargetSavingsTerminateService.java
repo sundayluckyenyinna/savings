@@ -18,6 +18,7 @@ import com.accionmfb.omnix.savings.target_saving.payload.response.CustomerDetail
 import com.accionmfb.omnix.savings.target_saving.payload.response.FundsTransferResponsePayload;
 import com.accionmfb.omnix.savings.target_saving.payload.response.TargetSavingsResponsePayload;
 import com.accionmfb.omnix.savings.target_saving.repository.TargetSavingsRepository;
+import com.accionmfb.omnix.savings.target_saving.util.TargetSavingsUtils;
 import com.google.gson.Gson;
 import org.apache.logging.log4j.util.Strings;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -61,8 +62,8 @@ public class TargetSavingsTerminateService
     @Value("${omnix.target.savings.poolaccount}")
     private String targetSavingsPoolAccount;
 
-    public Response processTargetSavingsTermination(TargetSavingTerminationRequestPayload requestPayload, String token)
-    {
+
+    public Response processTargetSavingsTermination(TargetSavingTerminationRequestPayload requestPayload, String token) {
         String username = jwtTokenUtil.getUsernameFromToken(token);
         String channel = jwtTokenUtil.getChannelFromToken(token);
 
@@ -72,7 +73,6 @@ public class TargetSavingsTerminateService
         // Check and balance all possible errors.
         Optional<ErrorResponse> optionalError = handleAllErrors(requestPayload);
         if(optionalError.isPresent()){
-            // Log the error
             genericService.generateLog("Target Savings termination", token, optionalError.get().getResponseMessage(), "API Request", "DEBUG", requestPayload.getRequestId());
             return optionalError.get();
         }
@@ -108,20 +108,15 @@ public class TargetSavingsTerminateService
                     .findTargetSavingsById(targetSavingsId).get();
         }
 
-        Response response = handleTargetSavingsTermination(
-                targetSavings, token, requestPayload.getRequestId()
-        );
+        Response response = handleTargetSavingsTermination(targetSavings, token, requestPayload.getRequestId(), requestPayload.getImei());
 
         if (response instanceof ErrorResponse){
-            // Log the error
             genericService.generateLog("Target Savings termination", token, response.getResponseMessage(), "API Request", "DEBUG", requestPayload.getRequestId());
             return response;
         }
 
         // Check if the response is from termination of no contribution.
-        if(response.getResponseMessage()
-                .equalsIgnoreCase(Constants.TERMINATION_SUCCESS_MESSAGE_NO_CONTRIBUTION))
-        {
+        if(response.getResponseMessage().equalsIgnoreCase(Constants.TERMINATION_SUCCESS_MESSAGE_NO_CONTRIBUTION)) {
             genericService.generateLog("Target Savings Termination for no contribution", token, response.getResponseMessage(), "API Request", "INFO", requestPayload.getRequestId());
             return getResponseForNoContribution(response, targetSavings);
         }
@@ -134,15 +129,13 @@ public class TargetSavingsTerminateService
         CustomerDetailsRequestPayload customerRequest = new CustomerDetailsRequestPayload();
         customerRequest.setMobileNumber(fundsPayload.getMobileNumber());
         customerRequest.setRequestId(generateRequestId());
+        customerRequest.setImei(requestPayload.getImei());
         String hash = genericService.encryptPayloadToString(customerRequest, token);
         customerRequest.setHash(hash);
 
-        CustomerDetailsResponsePayload customerDetails = externalService
-                .getCustomerDetailsFromCustomerService(customerRequest, token);
+        CustomerDetailsResponsePayload customerDetails = externalService.getCustomerDetailsFromCustomerService(customerRequest, token);
 
-        String fullName = String.join(
-                " ", customerDetails.getLastName(), customerDetails.getOtherName()
-        );
+        String fullName = String.join(" ", customerDetails.getLastName(), customerDetails.getOtherName());
 
         TargetSavingsResponsePayload responsePayload = new TargetSavingsResponsePayload();
         responsePayload.setId(targetSavings.getId().toString());
@@ -164,8 +157,8 @@ public class TargetSavingsTerminateService
         responsePayload.setDateTerminated(LocalDate.now().toString());
         responsePayload.setEarliestTerminationDate(targetSavings.getEarliestTerminationDate().toString());
         responsePayload.setTenorInMonths(targetSavings.getTenorInMonth());
-
-        // Get the total missed of the target savings goal.
+        responsePayload.setInterest(TargetSavingsUtils.resolveTargetSavingsInterest(targetSavings.getInterestAccrued()));
+        responsePayload.setTotalMissedAmount(String.valueOf(targetSavingsRepository.findCountOfMissedTargetSavingScheduleOfTargetSavings(targetSavings)));
         responsePayload.setTotalMissedAmount(String.valueOf(getTotalMissedSchedule(targetSavings)));
 
         PayloadResponse payloadResponse = PayloadResponse.getInstance();
@@ -178,18 +171,15 @@ public class TargetSavingsTerminateService
         return payloadResponse;
     }
 
-    private int getTotalMissedSchedule(TargetSavings targetSavings)
-    {
-        List<TargetSavingSchedule> schedules = targetSavingsRepository
-                .findAllTargetSavingSchedulesByParent(targetSavings);
+    private int getTotalMissedSchedule(TargetSavings targetSavings) {
+        List<TargetSavingSchedule> schedules = targetSavingsRepository.findAllTargetSavingSchedulesByParent(targetSavings);
         List<TargetSavingSchedule> missedSchedules = schedules.stream()
                 .filter(schedule -> schedule.getStatus().equalsIgnoreCase(TargetSavingStatus.MISSED.name()))
                 .collect(Collectors.toList());
         return missedSchedules.size();
     }
 
-    Response getResponseForNoContribution(Response response, TargetSavings targetSavings)
-    {
+    Response getResponseForNoContribution(Response response, TargetSavings targetSavings) {
         TargetSavingsResponsePayload responsePayload = new TargetSavingsResponsePayload();
         responsePayload.setId(targetSavings.getId().toString());
         responsePayload.setStatus(TargetSavingStatus.TERMINATED.name());
@@ -209,7 +199,7 @@ public class TargetSavingsTerminateService
 
         // Get the total missed of the target savings goal.
         responsePayload.setTotalMissedAmount(String.valueOf(getTotalMissedSchedule(targetSavings)));
-
+        responsePayload.setInterest(TargetSavingsUtils.resolveTargetSavingsInterest(targetSavings.getInterestAccrued()));
         PayloadResponse payloadResponse = PayloadResponse.getInstance();
         payloadResponse.setResponseCode(ResponseCodes.SUCCESS_CODE.getResponseCode());
         payloadResponse.setResponseMessage("Success");
@@ -218,8 +208,7 @@ public class TargetSavingsTerminateService
         return payloadResponse;
     }
     
-    Optional<ErrorResponse> handleAllErrors(TargetSavingTerminationRequestPayload requestPayload)
-    {
+    Optional<ErrorResponse> handleAllErrors(TargetSavingTerminationRequestPayload requestPayload) {
         ErrorResponse errorResponse = ErrorResponse.getInstance();
         errorResponse.setResponseCode(ResponseCodes.FAILED_MODEL.getResponseCode());
 
@@ -274,7 +263,7 @@ public class TargetSavingsTerminateService
         }
 
         // Validate the existence of the parent targetSavings
-        if( !targetSavings.isPresent() ) {
+        if(targetSavings.isEmpty()) {
             // Check if it is due to the goalName or targetSavingsId
             if( goalName != null ){
                 message = genericService.getMessageOfTargetSavings("notexistname",
@@ -289,9 +278,7 @@ public class TargetSavingsTerminateService
         }
 
         // Check that the requestId is not already used.
-        else if(targetSavingsRepository.findTargetSavingsByRequestId(requestPayload.getRequestId())
-                .isPresent())
-        {
+        else if(targetSavingsRepository.findTargetSavingsByRequestId(requestPayload.getRequestId()).isPresent()) {
             message = genericService.getMessageOfRequest("sameid",
                     new String[] { requestPayload.getRequestId() });
             errorResponse.setResponseMessage(message);
@@ -299,8 +286,7 @@ public class TargetSavingsTerminateService
         }
 
         // Check that the target savings is not terminated already
-        else if( targetSavings.get().getStatus().equalsIgnoreCase(TargetSavingStatus.TERMINATED.name()))
-        {
+        else if( targetSavings.get().getStatus().equalsIgnoreCase(TargetSavingStatus.TERMINATED.name())) {
             if(goalName != null){
                 message = genericService.getMessageOfTargetSavings("terminatedname",
                         new String[]{requestPayload.getGoalName()});
@@ -314,11 +300,8 @@ public class TargetSavingsTerminateService
         }
 
         // Check that the target savings the earliest termination date is due
-        else if (targetSavings.get().getEarliestTerminationDate()
-                .compareTo(LocalDate.now()) > 0)
-        {
-            message = genericService.getMessageOfTargetSavings("earliest.termination",
-                    new String[]{targetSavings.get().getEarliestTerminationDate().toString()});
+        else if (targetSavings.get().getEarliestTerminationDate().isAfter(genericService.getCurrentDateTime().toLocalDate())) {
+            message = genericService.getMessageOfTargetSavings("earliest.termination", new String[]{targetSavings.get().getEarliestTerminationDate().toString()});
             errorResponse.setResponseMessage(message);
             return Optional.ofNullable(errorResponse);
         }
@@ -329,31 +312,25 @@ public class TargetSavingsTerminateService
 
 
     // handle the termination of the operation
-    private Response handleTargetSavingsTermination(TargetSavings targetSavings, String token, String requestId)
-    {
+    private Response handleTargetSavingsTermination(TargetSavings targetSavings, String token, String requestId, String imei) {
         // Check if there is any contribution at all
-        boolean isContributed = new BigDecimal(clean(targetSavings.getMilestoneAmount()))
-                .compareTo(BigDecimal.ZERO) > 0;
+        boolean isContributed = new BigDecimal(clean(targetSavings.getMilestoneAmount())).compareTo(BigDecimal.ZERO) > 0;
 
         // If there is no contribution, then terminate without transfer
         if( !isContributed )
             return terminateForNoContribution(targetSavings);
         else
-            return terminateForContribution(targetSavings, token, requestId);
+            return terminateForContribution(targetSavings, token, requestId, imei);
 
     }
 
-    private Response terminateForNoContribution(TargetSavings targetSavings)
-    {
+    private Response terminateForNoContribution(TargetSavings targetSavings) {
         return terminate(targetSavings, Strings.EMPTY);
     }
 
-    private Response terminateForContribution(
-            TargetSavings targetSavings, String token, String requestId
-    )
-    {
+    private Response terminateForContribution(TargetSavings targetSavings, String token, String requestId, String imei) {
         // Do fund transfer to the customer's account first.
-        Response fundsResponse = doTerminationFundTransfer(targetSavings, token, requestId);
+        Response fundsResponse = doTerminationFundTransfer(targetSavings, token, requestId, imei);
 
         // If the funds transfer fails, return the error and failure to the calling method. Don't terminate!
         if (fundsResponse instanceof ErrorResponse){
@@ -363,10 +340,9 @@ public class TargetSavingsTerminateService
         }
 
         // The funds transfer is a success, try terminating the goal.
-        FundsTransferResponsePayload fundsTrans =
-                (FundsTransferResponsePayload) ((PayloadResponse) fundsResponse).getResponseData();
+        FundsTransferResponsePayload fundsTrans = (FundsTransferResponsePayload) ((PayloadResponse) fundsResponse).getResponseData();
 
-        Response terminationResponse = terminate(targetSavings, fundsTrans.getTransRef());
+        Response terminationResponse = terminate(targetSavings, fundsTrans.getT24TransRef());
 
         // If the termination fails (which is highly unlikely as per DB operations!), return the error
         if(terminationResponse instanceof ErrorResponse)
@@ -385,35 +361,30 @@ public class TargetSavingsTerminateService
      * @param targetSavings: TargetSavings
      * @return terminationResponse : Response
      */
-    private Response terminate(TargetSavings targetSavings, String transRef)
-    {
+    private Response terminate(TargetSavings targetSavings, String transRef) {
         Response response;
-
         try{
 
             // Get all the schedules associated with the target savings.
-            List<TargetSavingSchedule> schedules = targetSavingsRepository
-                    .findAllTargetSavingSchedulesByParent(targetSavings);
+            List<TargetSavingSchedule> schedules = targetSavingsRepository.findAllTargetSavingSchedulesByParent(targetSavings);
 
             // Filter out the schedules that are pending to be terminated.
             schedules = schedules.stream()
-                    .filter(schedule -> schedule.getStatus()
-                            .equalsIgnoreCase(TargetSavingStatus.PENDING.name()))
+                    .filter(schedule -> schedule.getStatus().equalsIgnoreCase(TargetSavingStatus.PENDING.name()))
                     .collect(Collectors.toList());
 
             // Terminate all the pending schedules by updating the status
-            schedules
-                    .forEach(s -> {
-                        s.setStatus(TargetSavingStatus.TERMINATED.name());
-                        s.setExecutedAt(LocalDate.now());
-                        targetSavingsRepository.updateTargetSavingSchedule(s);
-                    });
+            schedules.forEach(s -> {
+                s.setStatus(TargetSavingStatus.TERMINATED.name());
+                s.setExecutedAt(LocalDate.now());
+                targetSavingsRepository.updateTargetSavingSchedule(s);
+            });
 
             // Terminate the parent target savings by updating the status
             targetSavings.setStatus(TargetSavingStatus.TERMINATED.name());
             targetSavings.setTerminatedBy(SYSTEM.name());
             targetSavings.setTerminationDate(LocalDate.now());
-            targetSavings.setInterestPaid(true);
+            targetSavings.setInterestPaid(false);
             targetSavings.setInterestPaidAt(LocalDate.now());
             targetSavings.setTransRef(transRef);
             targetSavingsRepository.updateTargetSavings(targetSavings);
@@ -432,8 +403,7 @@ public class TargetSavingsTerminateService
     }
 
     
-    private Response doTerminationFundTransfer(TargetSavings targetSavings, String token, String reqId)
-    {
+    private Response doTerminationFundTransfer(TargetSavings targetSavings, String token, String reqId, String imei) {
         Response response;
 
         String prefix;
@@ -443,16 +413,15 @@ public class TargetSavingsTerminateService
         AccountDetailsRequestPayload detailsRequestPayload = new AccountDetailsRequestPayload();
         detailsRequestPayload.setAccountNumber(accountNumber);
         detailsRequestPayload.setRequestId(reqId);
+        detailsRequestPayload.setImei(imei);
         String hash = genericService.encryptPayloadToString(detailsRequestPayload, token);
         detailsRequestPayload.setHash(hash);
 
-        AccountDetailsResponsePayload accountDetails = externalService
-                .getAccountDetailsFromAccountService(detailsRequestPayload, token);
-
+        AccountDetailsResponsePayload accountDetails = externalService.getAccountDetailsFromAccountService(detailsRequestPayload, token);
 
         String responseCode = accountDetails.getResponseCode();
 
-        if( !responseCode.equalsIgnoreCase(ResponseCodes.SUCCESS_CODE.getResponseCode())) {
+        if(!responseCode.equalsIgnoreCase(ResponseCodes.SUCCESS_CODE.getResponseCode())) {
             response = ErrorResponse.getInstance();
             response.setResponseCode(responseCode);
             prefix = "Account details retrieval failure: ";
@@ -462,12 +431,11 @@ public class TargetSavingsTerminateService
         }
 
         // Now the fetching of the account details was a  success
-        String narration = targetSavings.getGoalName()
-                + "-TERMINATION-" + targetSavings.getAccountNumber();
+        String narration = targetSavings.getGoalName() + "-TERMINATION-" + targetSavings.getAccountNumber();
 
         // Prepare the total amount earned by the customer
         BigDecimal totalEarnings = new BigDecimal(clean(targetSavings.getMilestoneAmount()))
-                .add(new BigDecimal(clean(targetSavings.getTotalInterest())))
+                .add(new BigDecimal(clean(targetSavings.getInterestAccrued())))
                 .setScale(2, RoundingMode.FLOOR);
 
         // Create the fund transfer payload
@@ -484,14 +452,14 @@ public class TargetSavingsTerminateService
         fundsTransferPayload.setRequestId(genericService.generateTransRef("TS"));
         fundsTransferPayload.setToken(token);
         fundsTransferPayload.setNarration(narration);
+        fundsTransferPayload.setImei(imei);
         String hash1 = genericService.encryptFundTransferPayload(fundsTransferPayload, token);
         fundsTransferPayload.setHash(hash1);
 
         String requestJson = gson.toJson(fundsTransferPayload);
 
         // Call the funds transfer microservice.
-        FundsTransferResponsePayload fundsTransferResponsePayload = externalService
-                .getFundsTransferResponse(token, requestJson);
+        FundsTransferResponsePayload fundsTransferResponsePayload = externalService.getFundsTransferResponse(token, requestJson);
 
         // Check that the service was even reached in the first place.
         String fresponseCode = fundsTransferResponsePayload.getResponseCode();

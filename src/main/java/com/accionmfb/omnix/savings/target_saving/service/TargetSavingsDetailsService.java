@@ -1,6 +1,8 @@
 package com.accionmfb.omnix.savings.target_saving.service;
 
+import com.accionmfb.omnix.savings.target_saving.constant.ModelStatus;
 import com.accionmfb.omnix.savings.target_saving.constant.ResponseCodes;
+import com.accionmfb.omnix.savings.target_saving.constant.TargetSavingStatus;
 import com.accionmfb.omnix.savings.target_saving.dto.ErrorResponse;
 import com.accionmfb.omnix.savings.target_saving.dto.PayloadResponse;
 import com.accionmfb.omnix.savings.target_saving.dto.Response;
@@ -16,6 +18,7 @@ import com.accionmfb.omnix.savings.target_saving.payload.response.AccountDetails
 import com.accionmfb.omnix.savings.target_saving.payload.response.CustomerDetailsResponsePayload;
 import com.accionmfb.omnix.savings.target_saving.payload.response.TargetSavingsResponsePayload;
 import com.accionmfb.omnix.savings.target_saving.repository.TargetSavingsRepository;
+import com.accionmfb.omnix.savings.target_saving.util.TargetSavingsUtils;
 import com.google.gson.Gson;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -105,6 +108,7 @@ public class TargetSavingsDetailsService
         AccountDetailsRequestPayload accountRequest = new AccountDetailsRequestPayload();
         accountRequest.setAccountNumber(targetSavings.get().getAccountNumber());
         accountRequest.setRequestId(requestPayload.getRequestId());
+        accountRequest.setImei(requestPayload.getImei());
         String hash = genericService.encryptPayloadToString(accountRequest, token);
         accountRequest.setHash(hash);
 
@@ -115,6 +119,7 @@ public class TargetSavingsDetailsService
         CustomerDetailsRequestPayload customerRequest = new CustomerDetailsRequestPayload();
         customerRequest.setMobileNumber(accountDetails.getMobileNumber());
         customerRequest.setRequestId(requestPayload.getRequestId());
+        customerRequest.setImei(requestPayload.getImei());
         String hash1 = genericService.encryptPayloadToString(customerRequest, token);
         customerRequest.setHash(hash1);
 
@@ -152,7 +157,7 @@ public class TargetSavingsDetailsService
         responsePayload.setTargetAmount(targetSavings.get().getTargetAmount());
         responsePayload.setMobileNumber(accountDetails.getMobileNumber());
         responsePayload.setRefId(targetSavings.get().getTransRef());
-        responsePayload.setStatus(targetSavings.get().getStatus());
+        responsePayload.setStatus(targetSavings.get().getStatus().equalsIgnoreCase(TargetSavingStatus.SUCCESS.name()) ? ModelStatus.ACTIVE.name() : targetSavings.get().getStatus());
         responsePayload.setMilestoneAmount(targetSavings.get().getMilestoneAmount());
         responsePayload.setCustomerName(
                 String.join(" ", customerDetails.getLastName(), customerDetails.getOtherName())
@@ -177,6 +182,8 @@ public class TargetSavingsDetailsService
         responsePayload.setResponseCode(ResponseCodes.SUCCESS_CODE.getResponseCode());
         responsePayload.setDateTerminated(targetSavings.get().getTerminationDate().toString());
         responsePayload.setTerminatedBy(targetSavings.get().getTerminatedBy());
+        responsePayload.setInterest(TargetSavingsUtils.resolveTargetSavingsInterest(targetSavings.get().getInterestAccrued()));
+        responsePayload.setTotalMissedAmount(String.valueOf(targetSavingsRepository.findCountOfMissedTargetSavingScheduleOfTargetSavings(targetSavings.get())));
 
         // Prepare the response payload.
         PayloadResponse payloadResponse = PayloadResponse.getInstance();

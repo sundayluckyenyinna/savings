@@ -1,6 +1,8 @@
 package com.accionmfb.omnix.savings.target_saving.service;
 
+import com.accionmfb.omnix.savings.target_saving.constant.ModelStatus;
 import com.accionmfb.omnix.savings.target_saving.constant.ResponseCodes;
+import com.accionmfb.omnix.savings.target_saving.constant.TargetSavingStatus;
 import com.accionmfb.omnix.savings.target_saving.dto.ErrorResponse;
 import com.accionmfb.omnix.savings.target_saving.dto.PayloadResponse;
 import com.accionmfb.omnix.savings.target_saving.dto.Response;
@@ -14,6 +16,7 @@ import com.accionmfb.omnix.savings.target_saving.payload.response.CustomerDetail
 import com.accionmfb.omnix.savings.target_saving.payload.response.TargetSavingsDataResponsePayload;
 import com.accionmfb.omnix.savings.target_saving.payload.response.TargetSavingsResponsePayload;
 import com.accionmfb.omnix.savings.target_saving.repository.TargetSavingsRepository;
+import com.accionmfb.omnix.savings.target_saving.util.TargetSavingsUtils;
 import com.google.gson.Gson;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -55,6 +58,7 @@ public class TargetSavingsAccountService
         AccountDetailsRequestPayload accountRequest = new AccountDetailsRequestPayload();
         accountRequest.setAccountNumber(payload.getAccountNumber());
         accountRequest.setRequestId(payload.getRequestId());
+        accountRequest.setImei(payload.getImei());
         String hash = genericService.encryptPayloadToString(accountRequest, token);
         accountRequest.setHash(hash);
 
@@ -65,6 +69,7 @@ public class TargetSavingsAccountService
         CustomerDetailsRequestPayload customerRequest = new CustomerDetailsRequestPayload();
         customerRequest.setMobileNumber(accountDetails.getMobileNumber());
         customerRequest.setRequestId(payload.getRequestId());
+        customerRequest.setImei(payload.getImei());
         String hash1 = genericService.encryptPayloadToString(customerRequest, token);
         customerRequest.setHash(hash1);
 
@@ -133,7 +138,7 @@ public class TargetSavingsAccountService
         responsePayload.setTargetAmount(targetSavings.getTargetAmount());
         responsePayload.setMobileNumber(accountDetails.getMobileNumber());
         responsePayload.setRefId(targetSavings.getTransRef());
-        responsePayload.setStatus(targetSavings.getStatus());
+        responsePayload.setStatus(targetSavings.getStatus().equalsIgnoreCase(TargetSavingStatus.SUCCESS.name()) ? ModelStatus.ACTIVE.name() : targetSavings.getStatus());
         responsePayload.setMilestoneAmount(targetSavings.getMilestoneAmount());
         responsePayload.setCustomerName(
                 String.join(" ", customerDetails.getLastName(), customerDetails.getOtherName())
@@ -158,6 +163,8 @@ public class TargetSavingsAccountService
         responsePayload.setResponseCode(ResponseCodes.SUCCESS_CODE.getResponseCode());
         responsePayload.setDateTerminated(targetSavings.getTerminationDate().toString());
         responsePayload.setTerminatedBy(targetSavings.getTerminatedBy());
+        responsePayload.setInterest(TargetSavingsUtils.resolveTargetSavingsInterest(targetSavings.getInterestAccrued()));
+        responsePayload.setTotalMissedAmount(String.valueOf(targetSavingsRepository.findCountOfMissedTargetSavingScheduleOfTargetSavings(targetSavings)));
 
         return responsePayload;
     }

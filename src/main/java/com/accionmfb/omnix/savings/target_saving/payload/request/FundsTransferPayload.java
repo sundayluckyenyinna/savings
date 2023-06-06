@@ -83,4 +83,7 @@ public class FundsTransferPayload
     private String token;
 
     private boolean useCommissionAsChargeType = false;
+
+    private String imei;
+
 }

@@ -1,5 +1,8 @@
 package com.accionmfb.omnix.savings.target_saving.util;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+
 public class TargetSavingsUtils
 {
     /**
@@ -11,9 +14,9 @@ public class TargetSavingsUtils
     {
         if(value == null)
             return null;
-        return value.replace(",", "")
-                .replace(" ", "")
-                .replace("\"", "")
+        return value.replaceAll(",", "")
+                .replaceAll(" ", "")
+                .replaceAll("\"", "")
                 .replace("\\", "");
     }
 
@@ -39,4 +42,9 @@ public class TargetSavingsUtils
         return result.toUpperCase();
     }
 
+    public static String resolveTargetSavingsInterest(String interest){
+        BigDecimal bigDecimal = new BigDecimal(interest);
+        bigDecimal = bigDecimal.setScale(2, RoundingMode.CEILING);
+        return bigDecimal.toString();
+    }
 }

@@ -181,9 +181,8 @@ public class TargetSavingsRepositoryImpl implements TargetSavingsRepository
                                 "SELECT tss FROM TargetSavingSchedule tss WHERE tss.targetSavings = :targetSavings AND tss.status = :status", TargetSavingSchedule.class)
                         .setParameter("targetSavings", targetSavings)
                         .setParameter("status", PENDING.name());
-        List<TargetSavingSchedule> schedules = query.getResultList();
 
-        return schedules;
+        return query.getResultList();
     }
 
     @Override
@@ -221,6 +220,5 @@ public class TargetSavingsRepositoryImpl implements TargetSavingsRepository
     {
         return findAllMissedSchedulesOfTargetSavings(targetSavings).size();
     }
-
 
 }

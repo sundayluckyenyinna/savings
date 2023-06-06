@@ -130,10 +130,8 @@ public class AesServiceImpl implements AesService {
     @Override
     public ValidationPayload validateRequest(GenericPayload genericRequestPayload) {
 
-//        LoggingUtil.debugInfo("Validating Encrypted Request: " + gson.toJson(genericRequestPayload), this.getClass(), LogMode.INFO.name());
         String encryptedRequest = genericRequestPayload.getRequest();
         String decryptedRequest;
-//        String errorMessage;
 
         ValidationPayload validatorPayload = new ValidationPayload();
         try {
@@ -166,7 +164,6 @@ public class AesServiceImpl implements AesService {
             GenericPayload responsePayload = new GenericPayload();
             responsePayload.setResponse(encryptFlutterString(exceptionJson, aesEncryptionKey));
 
-//            LoggingUtil.exceptionInfo(ex, this.getClass(), LogMode.DEBUG.name());
             return validatorPayload;
         }
         return validatorPayload;

@@ -6,10 +6,9 @@
 package com.accionmfb.omnix.savings.target_saving.payload.request;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import javax.validation.constraints.NotBlank;
-import javax.validation.constraints.NotEmpty;
-import javax.validation.constraints.NotNull;
-import javax.validation.constraints.Pattern;
+
+import javax.validation.constraints.*;
+
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -49,11 +48,11 @@ public class TargetSavingsRequestPayload {
     @NotNull(message = "Frequency cannot be null")
     @NotEmpty(message = "Frequency cannot be empty")
     @NotBlank(message = "Frequency cannot be blank")
-    @Pattern(regexp = "^(Daily|Weekly|Monthly)$", message = "Value must be either Daily, Weekly, Monthly")
+    @Pattern(regexp = "^(Daily|Weekly|Monthly)$", message = "Frequency must be either Daily, Weekly, Monthly")
     private String frequency;
 
     @NotBlank(message = "Savings amount is required")
-    @Pattern(regexp = "^([0-9]{1,3},([0-9]{3},)*[0-9]{3}|[0-9]+)(\\.[0-9][0-9])?$", message = "Savings Amount must contain only digits, comma or dot only")
+    @Pattern(regexp = "(\\$)?[0-9]+\\.*[0-9]*", message = "Savings Amount must contain only digits, comma or dot only")
     @Schema(name = "Savings Amount", example = "1,000.00", description = "Savings Amount")
     private String savingsAmount;
 
@@ -71,4 +70,6 @@ public class TargetSavingsRequestPayload {
     @NotEmpty(message = "Request id cannot be empty")
     @NotBlank(message = "Request id cannot be blank")
     private String requestId;
+
+    private String imei;
 }

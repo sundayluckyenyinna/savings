@@ -10,11 +10,12 @@ import com.accionmfb.omnix.savings.target_saving.model.TargetSavings;
 import com.accionmfb.omnix.savings.target_saving.payload.request.*;
 import com.accionmfb.omnix.savings.target_saving.payload.response.*;
 import com.accionmfb.omnix.savings.target_saving.repository.TargetSavingsRepository;
+import com.accionmfb.omnix.savings.target_saving.util.TargetSavingsUtils;
 import com.google.gson.Gson;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.util.Strings;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -26,7 +27,7 @@ import java.util.stream.Collectors;
 
 import static com.accionmfb.omnix.savings.target_saving.constant.ResponseCodes.INSUFFICIENT_BALANCE;
 import static com.accionmfb.omnix.savings.target_saving.constant.ResponseCodes.SUCCESS_CODE;
-import static com.accionmfb.omnix.savings.target_saving.constant.Terminator.SYSTEM;
+import static com.accionmfb.omnix.savings.target_saving.constant.TargetSavingsFrequency.*;
 import static com.accionmfb.omnix.savings.target_saving.util.TargetSavingsUtils.clean;
 import static com.accionmfb.omnix.savings.target_saving.util.TargetSavingsUtils.generateRequestId;
 
@@ -37,6 +38,7 @@ import static com.accionmfb.omnix.savings.target_saving.util.TargetSavingsUtils.
  *  customer.
  */
 
+@Slf4j
 @Service
 public class TargetSavingMissedService
 {
@@ -134,7 +136,7 @@ public class TargetSavingMissedService
             targetSavings = targetSavingsRepository.findTargetSavingsById(targetSavingsId);
 
         // Validate the existence of the parent targetSavings
-        if( !targetSavings.isPresent() ) {
+        if(targetSavings.isEmpty()) {
             // Check if it is due to the goalName or targetSavingsId
             String message;
             if( goalName != null ){
@@ -156,52 +158,47 @@ public class TargetSavingMissedService
         AccountDetailsRequestPayload accountRequest = new AccountDetailsRequestPayload();
         accountRequest.setAccountNumber(targetSavings.get().getAccountNumber());
         accountRequest.setRequestId(requestPayload.getRequestId());
+        accountRequest.setImei(requestPayload.getImei());
         String hash = genericService.encryptPayloadToString(accountRequest, token);
         accountRequest.setHash(hash);
 
-        AccountDetailsResponsePayload accountDetails = externalService
-                .getAccountDetailsFromAccountService(accountRequest, token);
+        AccountDetailsResponsePayload accountDetails = externalService.getAccountDetailsFromAccountService(accountRequest, token);
 
         CustomerDetailsRequestPayload customerRequest = new CustomerDetailsRequestPayload();
         customerRequest.setMobileNumber(accountDetails.getMobileNumber());
         customerRequest.setRequestId(requestPayload.getRequestId());
+        customerRequest.setImei(requestPayload.getImei());
         String hash1 = genericService.encryptPayloadToString(customerRequest, token);
         customerRequest.setHash(hash1);
 
-        CustomerDetailsResponsePayload customerDetails = externalService
-                .getCustomerDetailsFromCustomerService(customerRequest, token);
+        CustomerDetailsResponsePayload customerDetails = externalService.getCustomerDetailsFromCustomerService(customerRequest, token);
 
         // Get the account balance details
         AccountBalanceRequestPayload accountBalRequest = new AccountBalanceRequestPayload();
         accountBalRequest.setAccountNumber(targetSavings.get().getAccountNumber());
         accountBalRequest.setRequestId(requestPayload.getRequestId());
+        accountBalRequest.setImei(requestPayload.getImei());
         String hash2 = genericService.encryptPayloadToString(accountBalRequest, token);
         accountBalRequest.setHash(hash2);
 
-        AccountBalanceResponsePayload accountBalDetails = externalService
-                .getAccountBalanceFromAccountService(accountBalRequest, token);
-
+        AccountBalanceResponsePayload accountBalDetails = externalService.getAccountBalanceFromAccountService(accountBalRequest, token);
 
         // handle all the errors and validations
-        Optional<ErrorResponse> errorResponseOptional = handleAllErrors(
-                requestPayload, targetSavings,
-                accountDetails, customerDetails,
-                accountBalDetails
-        );
+        Optional<ErrorResponse> errorResponseOptional = handleAllErrors(requestPayload, targetSavings, accountDetails, customerDetails, accountBalDetails);
         if (errorResponseOptional.isPresent()) {
-            // Log the error
             genericService.generateLog("Target Savings Missed", token, errorResponseOptional.get().getResponseMessage(), "API Request", "INFO", requestPayload.getRequestId());
             return errorResponseOptional.get();
         }
 
         int graceDays = (int)(Double.parseDouble(graceOfMissedSchedules));
 
+        LocalDate now = genericService.getCurrentDateTime().toLocalDate();
+
         // Fetch all the missed schedules within the grace period.
         List<TargetSavingSchedule> missedSchedules = targetSavingsRepository
                 .findAllMissedSchedulesOfTargetSavings(targetSavings.get())
                 .stream()
-                .filter(schedule -> schedule.getDueAt().plusDays(Long.valueOf(graceDays))
-                        .compareTo(LocalDate.now()) >= 0)
+                .filter(schedule -> schedule.getDueAt().plusDays(graceDays).isAfter(now) || schedule.getDueAt().plusDays(graceDays).isEqual(now))
                 .collect(Collectors.toList());
 
         // Define the list of all successful and all failed missed executions
@@ -210,8 +207,7 @@ public class TargetSavingMissedService
 
         Map<String, List<TargetSavingSchedule>> result;
         try{
-            result = handleExecutionOfMissedGoals(token, missedSchedules, success, failed)
-                    .get();
+            result = handleExecutionOfMissedGoals(token, missedSchedules, success, failed, requestPayload.getImei()).get();
         }catch (Exception exception){
             response = ErrorResponse.getInstance();
             response.setResponseCode(ResponseCodes.INTERNAL_SERVER_ERROR.getResponseCode());
@@ -238,9 +234,8 @@ public class TargetSavingMissedService
         // Get the total contributed amount
         BigDecimal totalContribution = BigDecimal.ZERO;
 
-        for (int i = 0; i < successSchedules.size(); i++){
-            totalContribution = totalContribution
-                    .add(new BigDecimal(clean(successSchedules.get(i).getAmount())));
+        for (TargetSavingSchedule successSchedule : successSchedules) {
+            totalContribution = totalContribution.add(new BigDecimal(clean(successSchedule.getAmount())));
         }
 
         // Update the parameters of the parent target savings
@@ -248,16 +243,18 @@ public class TargetSavingMissedService
         BigDecimal newMilestone = oldMilestone.add(totalContribution);
         BigDecimal newMilestonePercent = newMilestone
                 .multiply(new BigDecimal("100"))
-                .divide(new BigDecimal(clean(targetSavings.get().getTargetAmount())), 5, RoundingMode.CEILING);
+                .divide(new BigDecimal(clean(targetSavings.get().getTargetAmount())), 2, RoundingMode.CEILING);
+
         int additionalContributionCount = successSchedules.size();
-        BigDecimal additionalInterestAccrued = new BigDecimal(clean(targetSavings.get()
-                .getDailyInterest()))
+
+        BigDecimal additionalInterestAccrued = new BigDecimal(clean(targetSavings.get().getDailyInterest()))
+                .multiply(new BigDecimal(String.valueOf(getTimesByFrequency(targetSavings.get().getFrequency()))))
                 .multiply(new BigDecimal(String.valueOf(additionalContributionCount)));
-        BigDecimal newInterestAccrued = new BigDecimal(clean(targetSavings.get()
-                .getInterestAccrued()))
+
+        BigDecimal newInterestAccrued = new BigDecimal(clean(targetSavings.get().getInterestAccrued()))
                 .add(additionalInterestAccrued);
-        int newContributionCount = targetSavings.get().getContributionCountForMonth()
-                + additionalContributionCount;
+
+        int newContributionCount = targetSavings.get().getContributionCountForMonth() + additionalContributionCount;
 
         targetSavings.get().setMilestoneAmount(newMilestone.toString());
         targetSavings.get().setMilestonePercent(newMilestonePercent.toString());
@@ -270,8 +267,6 @@ public class TargetSavingMissedService
         TargetSavingSchedule schedule = successSchedules.get(0);
         String mobileNo = accountDetails.getMobileNumber();
 
-        Response response1 = null;
-
         if(newMilestonePercent.doubleValue() >= 25 && !targetSavings.get().isSms25PercentSend()){
             handleSMS25PercentMilestone(schedule, mobileNo, token);
         }
@@ -282,109 +277,47 @@ public class TargetSavingMissedService
             handleSMS75PercentMilestone(schedule, mobileNo, token);
         }
         if (newMilestonePercent.doubleValue() >= 100 && !targetSavings.get().isSms100PercentSend()) {
-            response1 = handleSMS100PercentMilestone(schedule, mobileNo, token);
+            handleSMS100PercentMilestone(schedule, mobileNo, token, requestPayload.getImei());
         }
 
         PayloadResponse payloadResponse = PayloadResponse.getInstance();
         payloadResponse.setResponseCode(SUCCESS_CODE.getResponseCode());
         payloadResponse.setResponseMessage("success");
 
-        // Check if the milestone is not up to 100%, then return payload to client.
-        if(response1 == null){
-            // This will return an empty list if there is no successfully executed schedules for missed goals.
-            List<TargetSavingsResponsePayload> responseList = new ArrayList<>();
-            successSchedules.stream().forEach(schedule1 -> {
-                TargetSavingsResponsePayload responsePayload = new TargetSavingsResponsePayload();
-                responsePayload.setId(schedule.getTargetSavings().getId().toString());
-                responsePayload.setResponseCode(SUCCESS_CODE.getResponseCode());
-                responsePayload.setDueAt(schedule.getDueAt().toString());
-                responsePayload.setTargetAmount(schedule.getTargetSavings().getTargetAmount());
-                responsePayload.setEndDate(schedule.getTargetSavings().getEndDate().toString());
-                responsePayload.setGoalName(schedule.getTargetSavings().getGoalName());
-                responsePayload.setStatus(schedule.getStatus());
-                responsePayload.setSavingsAmount(schedule.getAmount());
-                responsePayload.setTenorInMonths(schedule.getTargetSavings().getTenorInMonth());
-                responsePayload.setEarliestTerminationDate(schedule.getTargetSavings()
-                        .getEarliestTerminationDate().toString());
-                responsePayload.setStartDate(schedule.getTargetSavings().getStartDate().toString());
-                responsePayload.setInterestRate(schedule.getTargetSavings().getInterestRate());
-                responsePayload.setMilestonePercentage(schedule.getTargetSavings().getMilestonePercent());
-                responsePayload.setCustomerName(
+        List<TargetSavingsResponsePayload> responseList = new ArrayList<>();
+        successSchedules.forEach(schedule1 -> {
+            TargetSavingsResponsePayload responsePayload = new TargetSavingsResponsePayload();
+            responsePayload.setId(schedule.getTargetSavings().getId().toString());
+            responsePayload.setResponseCode(SUCCESS_CODE.getResponseCode());
+            responsePayload.setDueAt(schedule.getDueAt().toString());
+            responsePayload.setTargetAmount(schedule.getTargetSavings().getTargetAmount());
+            responsePayload.setEndDate(schedule.getTargetSavings().getEndDate().toString());
+            responsePayload.setGoalName(schedule.getTargetSavings().getGoalName());
+            responsePayload.setStatus(schedule.getStatus().equalsIgnoreCase(TargetSavingStatus.SUCCESS.name()) ? ModelStatus.ACTIVE.name() : schedule.getStatus());
+            responsePayload.setSavingsAmount(schedule.getAmount());
+            responsePayload.setTenorInMonths(schedule.getTargetSavings().getTenorInMonth());
+            responsePayload.setEarliestTerminationDate(schedule.getTargetSavings().getEarliestTerminationDate().toString());
+            responsePayload.setStartDate(schedule.getTargetSavings().getStartDate().toString());
+            responsePayload.setInterestRate(schedule.getTargetSavings().getInterestRate());
+            responsePayload.setMilestonePercentage(schedule.getTargetSavings().getMilestonePercent());
+            responsePayload.setCustomerName(
                         String.join(" ", customerDetails.getLastName(), customerDetails.getOtherName())
                 );
-                responsePayload.setContributionFrequency(schedule.getTargetSavings().getFrequency());
-                responsePayload.setMilestoneAmount(schedule.getTargetSavings().getMilestoneAmount());
-                responsePayload.setMobileNumber(accountDetails.getMobileNumber());
-                responsePayload.setAccountNumber(accountDetails.getAccountNumber());
-                responsePayload.setRefId(schedule.getT24TransRef());
-                responseList.add(responsePayload);
-            });
+            responsePayload.setContributionFrequency(schedule.getTargetSavings().getFrequency());
+            responsePayload.setMilestoneAmount(schedule.getTargetSavings().getMilestoneAmount());
+            responsePayload.setMobileNumber(accountDetails.getMobileNumber());
+            responsePayload.setAccountNumber(accountDetails.getAccountNumber());
+            responsePayload.setRefId(schedule.getT24TransRef());
+            responsePayload.setInterest(TargetSavingsUtils.resolveTargetSavingsInterest(schedule.getTargetSavings().getInterestAccrued()));
+            responsePayload.setTotalMissedAmount(String.valueOf(targetSavingsRepository.findCountOfMissedTargetSavingScheduleOfTargetSavings(targetSavings.get())));
+            responseList.add(responsePayload);
+        });
 
-            TargetSavingsDataResponsePayload body = new TargetSavingsDataResponsePayload();
-            body.setResponseCode(SUCCESS_CODE.getResponseCode());
-            body.setData(responseList);
+        TargetSavingsDataResponsePayload body = new TargetSavingsDataResponsePayload();
+        body.setResponseCode(SUCCESS_CODE.getResponseCode());
+        body.setData(responseList);
 
-            payloadResponse.setResponseData(body);
-            return payloadResponse;
-        }
-
-        if(response1 != null){
-            if(response1 instanceof ErrorResponse){
-                // At this stage, the all missed and pending goals have been executed, but funds transfer to the customer has failed.
-                Response errorResponse = ErrorResponse.getInstance();
-                errorResponse.setResponseCode(ResponseCodes.REQUEST_PROCESSING.getResponseCode());
-
-                String message  = "Successful execution of missed goals, " +
-                        "but service error occurred during automatic goal termination and funds transfer. Please wait " +
-                        "a little while or consult the customer support: Call 07000222466, WhatsApp 07045222933";
-
-                errorResponse.setResponseMessage(message);
-
-                // Log the error
-                genericService.generateLog("Target Savings Missed", token, "Message: " + message, "API Request", "DEBUG", requestPayload.getRequestId());
-                return errorResponse;
-            }
-            else {
-                List<TargetSavingsResponsePayload> responseList = new ArrayList<>();
-                successSchedules.stream().forEach(schedule1 -> {
-                    TargetSavingsResponsePayload responsePayload = new TargetSavingsResponsePayload();
-                    responsePayload.setId(schedule.getTargetSavings().getId().toString());
-                    responsePayload.setResponseCode(SUCCESS_CODE.getResponseCode());
-                    responsePayload.setDueAt(schedule.getDueAt().toString());
-                    responsePayload.setTargetAmount(schedule.getTargetSavings().getTargetAmount());
-                    responsePayload.setEndDate(schedule.getTargetSavings().getEndDate().toString());
-                    responsePayload.setGoalName(schedule.getTargetSavings().getGoalName());
-                    responsePayload.setStatus(schedule.getStatus());
-                    responsePayload.setSavingsAmount(schedule.getAmount());
-                    responsePayload.setTenorInMonths(schedule.getTargetSavings().getTenorInMonth());
-                    responsePayload.setEarliestTerminationDate(schedule.getTargetSavings()
-                            .getEarliestTerminationDate().toString());
-                    responsePayload.setStartDate(schedule.getTargetSavings().getStartDate().toString());
-                    responsePayload.setInterestRate(schedule.getTargetSavings().getInterestRate());
-                    responsePayload.setMilestonePercentage(schedule.getTargetSavings().getMilestonePercent());
-                    responsePayload.setCustomerName(
-                            String.join(" ", customerDetails.getLastName(), customerDetails.getOtherName())
-                    );
-                    responsePayload.setContributionFrequency(schedule.getTargetSavings().getFrequency());
-                    responsePayload.setMilestoneAmount(schedule.getTargetSavings().getMilestoneAmount());
-                    responsePayload.setMobileNumber(accountDetails.getMobileNumber());
-                    responsePayload.setAccountNumber(accountDetails.getAccountNumber());
-                    responsePayload.setRefId(schedule.getT24TransRef());
-                    responsePayload.setTerminatedBy(SYSTEM.name());
-                    responsePayload.setDateTerminated(LocalDate.now().toString());
-                    responsePayload.setTotalMissedAmount("0");
-                    responseList.add(responsePayload);
-                });
-
-                TargetSavingsDataResponsePayload body = new TargetSavingsDataResponsePayload();
-                body.setResponseCode(SUCCESS_CODE.getResponseCode());
-                body.setData(responseList);
-
-                payloadResponse.setResponseData(body);
-                return payloadResponse;
-            }
-        }
-
+        payloadResponse.setResponseData(body);
         return payloadResponse;
     }
 
@@ -442,40 +375,10 @@ public class TargetSavingMissedService
         handleScheduleAfterSMS(schedule, response, "75");
     }
 
-    private Response
-    handleSMS100PercentMilestone(TargetSavingSchedule schedule, String mobileNo, String token){
+    private void
+    handleSMS100PercentMilestone(TargetSavingSchedule schedule, String mobileNo, String token, String imei){
         Response response = sendNotificationSMS(schedule, mobileNo, "100", token);
         handleScheduleAfterSMS(schedule, response, "100");
-
-        // Here we will send a request to the internal termination API
-        TargetSavingTerminationRequestPayload requestPayload =
-                new TargetSavingTerminationRequestPayload();
-
-        requestPayload.setGoalName(schedule.getTargetSavings().getGoalName());
-        requestPayload.setAccountNumber(schedule.getTargetSavings().getAccountNumber());
-        requestPayload.setRequestId(generateRequestId());
-        String hash = genericService.encryptPayloadToString(requestPayload, token);
-        requestPayload.setHash(hash);
-
-        Response response1 = terminateDueTargetSavings(requestPayload, token);
-
-        String responseCode = response1.getResponseCode();
-
-        /**
-         * If there is an error, it is likely that there was an issue in the funds transfer
-         * to the customer and the target saving goal is not yet terminated.
-          */
-        if (!responseCode.equalsIgnoreCase(SUCCESS_CODE.getResponseCode())){
-            String prefix = "Funds transfer to customer failure: ";
-            TargetSavings targetSavings = schedule.getTargetSavings();
-            targetSavings.setFailureReason(prefix + response1.getResponseMessage());
-            // Log the error
-            genericService.generateLog("Target Savings Missed", token, "Message: " + prefix + response1.getResponseMessage(), "API Request", "DEBUG", requestPayload.getRequestId());
-            targetSavingsRepository.updateTargetSavings(targetSavings);
-        }
-
-        // Here the transfer to the client is a success. No need to update the parent. It will all be done by the termination service.
-        return response1;
     }
 
     private Response
@@ -495,30 +398,6 @@ public class TargetSavingMissedService
         CompletableFuture<Response> smsCodeFuture = sendGoalSettingMilestoneSMS(smsPayload);
         return smsCodeFuture.join();
 
-    }
-
-    Response
-    terminateDueTargetSavings(TargetSavingTerminationRequestPayload requestPayload, String token)
-    {
-        Response response;
-        // send a request to the internal termination service
-
-        Response responsePayload = targetSavingsTerminateService
-                .processTargetSavingsTermination(requestPayload, token);
-
-        String responseCode = responsePayload.getResponseCode();
-
-        if(responsePayload instanceof ErrorResponse)
-        {
-            response = ErrorResponse.getInstance();
-            response.setResponseCode(responseCode);
-            response.setResponseMessage(responsePayload.getResponseMessage());
-            genericService.generateLog("Target savings Details retrieval", token, responsePayload.getResponseMessage(), "API Request", "DEBUG", requestPayload.getRequestId());
-            return response;
-        }
-
-        // The termination is successful and it is a PayloadResponse instance
-        return responsePayload;
     }
 
     public CompletableFuture<Response> sendGoalSettingMilestoneSMS(NotificationPayload requestPayload)
@@ -687,8 +566,7 @@ public class TargetSavingMissedService
         }
 
         // Validate that there is at least one missed goal executable.
-        int missedScheduleCount =
-                findAllExecutableMissedScheduleOfTargetSavings(targetSavings.get());
+        int missedScheduleCount = findAllExecutableMissedScheduleOfTargetSavings(targetSavings.get());
 
         if(missedScheduleCount < 1){
             message = genericService.getMessageOfTargetSavings("nomissedgoal",
@@ -697,7 +575,7 @@ public class TargetSavingMissedService
             return Optional.ofNullable(errorResponse);
         }
 
-//         Validate that there is sufficient amount now for all the missed goals
+         // Validate that there is sufficient amount now for all the missed goals
         if(!accountBalResponseCode.equalsIgnoreCase(ResponseCodes.SUCCESS_CODE.getResponseCode()))
         {
             message = accountBalDetails.getResponseMessage();
@@ -721,13 +599,10 @@ public class TargetSavingMissedService
     public int findAllExecutableMissedScheduleOfTargetSavings(TargetSavings targetSavings)
     {
         int graceDays = (int)(Double.parseDouble(graceOfMissedSchedules));
-        return targetSavingsRepository
+        return (int) targetSavingsRepository
                 .findAllMissedSchedulesOfTargetSavings(targetSavings)
                 .stream()
-                .filter(schedule -> schedule.getDueAt().plusDays(graceDays)
-                        .compareTo(LocalDate.now()) >= 0 )
-                .collect(Collectors.toList())
-                .size();
+                .filter(schedule -> schedule.getDueAt().plusDays(graceDays).isAfter(genericService.getCurrentDateTime().toLocalDate())).count();
     }
 
     private BigDecimal getTotalCostOfMissedSchedules(TargetSavings targetSavings)
@@ -735,23 +610,17 @@ public class TargetSavingMissedService
 
         int graceDays = (int)(Double.parseDouble(graceOfMissedSchedules));
 
-        int missedScheduleCount = targetSavingsRepository
-                .findAllMissedSchedulesOfTargetSavings(targetSavings)
-                .stream()
-                .filter(schedule -> schedule.getDueAt().plusDays(graceDays)
-                        .compareTo(LocalDate.now()) >= 0)
-                .collect(Collectors.toList())
-                .size();
+        List<TargetSavingSchedule> missedSchedules = targetSavingsRepository.findAllMissedSchedulesOfTargetSavings(targetSavings);
+        int missedScheduleCount = (int)missedSchedules.stream()
+                .filter(schedule -> schedule.getDueAt().plusDays(graceDays).isAfter(genericService.getCurrentDateTime().toLocalDate())).count();
 
-        TargetSavingSchedule schedule = targetSavingsRepository
-                .findAllMissedSchedulesOfTargetSavings(targetSavings).get(0);
+        TargetSavingSchedule schedule = missedSchedules.get(0);
 
         String singleCost = schedule.getAmount();
 
-        BigDecimal totalCost = new BigDecimal(clean(singleCost))
+        return new BigDecimal(clean(singleCost))
                 .multiply(new BigDecimal(String.valueOf(missedScheduleCount)))
-                .setScale(5, RoundingMode.CEILING);
-        return totalCost;
+                .setScale(2, RoundingMode.CEILING);
     }
 
     private boolean isAccountBalanceSufficient(BigDecimal accountBalance, BigDecimal cost)
@@ -765,27 +634,22 @@ public class TargetSavingMissedService
             String token,
             List<TargetSavingSchedule> missedSchedules,
             List<TargetSavingSchedule> successfulExecutedSchedules,
-            List<TargetSavingSchedule> failedExecutedSchedules
+            List<TargetSavingSchedule> failedExecutedSchedules, String imei
     )
     {
 
         Map<String, List<TargetSavingSchedule>> map = new HashMap<>();
 
-        missedSchedules.stream()
+        missedSchedules
                 .forEach(schedule -> {
-                    schedule.setExecutedAt(LocalDate.now());
+                    schedule.setExecutedAt(genericService.getCurrentDateTime().toLocalDate());
 
-                    Response response = executeFundsTransferForSchedule(schedule, token);
+                    Response response = executeFundsTransferForSchedule(schedule, token, imei);
 
                     if( response instanceof  ErrorResponse ){
 
                         failedExecutedSchedules.add(schedule);
                         String code = response.getResponseCode();
-
-                        /**
-                         * Check if it is due to insufficient balance. Though, this code will
-                         * never be reached as it will be blocked in 'handleAllErrors() validator
-                         */
                         if(code.equalsIgnoreCase(INSUFFICIENT_BALANCE.getResponseCode())){
                             schedule.setStatus(TargetSavingStatus.MISSED.name());
                         }else{
@@ -808,7 +672,7 @@ public class TargetSavingMissedService
     }
 
     private Response
-    executeFundsTransferForSchedule(TargetSavingSchedule schedule, String token)
+    executeFundsTransferForSchedule(TargetSavingSchedule schedule, String token, String imei)
     {
         // Get the account details of the customer
         TargetSavings parent = schedule.getTargetSavings();
@@ -819,12 +683,11 @@ public class TargetSavingMissedService
         AccountDetailsRequestPayload requestPayload = new AccountDetailsRequestPayload();
         requestPayload.setAccountNumber(accountNumber);
         requestPayload.setRequestId(generateRequestId());
+        requestPayload.setImei(imei);
         String hash = genericService.encryptPayloadToString(requestPayload, token);
         requestPayload.setHash(hash);
 
-        AccountDetailsResponsePayload accountDetails = externalService
-                .getAccountDetailsFromAccountService(requestPayload, token);
-
+        AccountDetailsResponsePayload accountDetails = externalService.getAccountDetailsFromAccountService(requestPayload, token);
 
         String detailsResponseCode = accountDetails.getResponseCode();
 
@@ -858,16 +721,16 @@ public class TargetSavingMissedService
         fundsTransferPayload.setRequestId(genericService.generateTransRef("TS"));
         fundsTransferPayload.setToken(token);
         fundsTransferPayload.setNarration(narration);
+        fundsTransferPayload.setImei(imei);
         String hash2 = genericService.encryptFundTransferPayload(fundsTransferPayload, token);
         fundsTransferPayload.setHash(hash2);
 
         String requestJson = gson.toJson(fundsTransferPayload);
 
-//         Call the funds transfer microservice.
-        FundsTransferResponsePayload fundsTransferResponsePayload = externalService
-                .getFundsTransferResponse(token, requestJson);
+        // Call the funds transfer microservice.
+        FundsTransferResponsePayload fundsTransferResponsePayload = externalService.getFundsTransferResponse(token, requestJson);
 
-//         Check that the fund transfer was a success
+         // Check that the fund transfer was a success
         String fundResponseCode = fundsTransferResponsePayload.getResponseCode();
 
         if( !fundResponseCode.equalsIgnoreCase(ResponseCodes.SUCCESS_CODE.getResponseCode())){
@@ -875,7 +738,10 @@ public class TargetSavingMissedService
             errorResponse.setResponseCode(fundResponseCode);
             prefix = "Funds transfer failure: ";
             errorResponse.setResponseMessage(prefix + fundsTransferResponsePayload.getResponseMessage());
+
             genericService.generateLog("Target savings Details retrieval", token, prefix + fundsTransferResponsePayload.getResponseMessage(), "API Request", "INFO", requestPayload.getRequestId());
+            log.info("Funds Transfer failure for termination schedule execution: {}", gson.toJson(fundsTransferResponsePayload));
+
             return errorResponse;
         }
 
@@ -887,32 +753,18 @@ public class TargetSavingMissedService
         return payloadResponse;
     }
 
-    private void handleSuccessfulExecutionOfSchedule
-            (TargetSavingSchedule schedule, String mobileNo, String transRef)
-    {
-
-        // Get the parent target savings
-        TargetSavings targetSavings = schedule.getTargetSavings();
-        int newContributionCount = targetSavings.getContributionCountForMonth() + 1;
-        targetSavings.setContributionCountForMonth(newContributionCount);
-
-        // Calculate and set the interest after the contribution
-        double newInterestAccrued = newContributionCount * Double.parseDouble(targetSavings.getDailyInterest());
-        targetSavings.setInterestAccrued(String.valueOf(newInterestAccrued));
-
-        // Update the milestone amount and percentage
-        BigDecimal oldMilestoneAmount = new BigDecimal(clean(targetSavings.getMilestoneAmount()));
-        BigDecimal newMilestoneAmount = oldMilestoneAmount.add(new BigDecimal(clean(schedule.getAmount())));
-        targetSavings.setMilestoneAmount(newMilestoneAmount.toString());
-
-        BigDecimal newMilestonePercent = newMilestoneAmount
-                .multiply(new BigDecimal("100"))
-                .divide(new BigDecimal(clean(targetSavings.getTargetAmount())), 5, RoundingMode.CEILING);
-        targetSavings.setMilestonePercent(newMilestonePercent.toString());
-        targetSavings.setTransRef(transRef);
-
-        // Update the parent target savings
-        targetSavingsRepository.updateTargetSavings(targetSavings);
+    private int getTimesByFrequency(String frequency){
+        if(frequency.equalsIgnoreCase(DAILY.name())){
+            return 1;
+        }
+        else if(frequency.equalsIgnoreCase(WEEKLY.name())){
+            return 7;
+        }
+        else if(frequency.equalsIgnoreCase(MONTHLY.name())){
+            return 30;
+        }
+        return 0;
 
     }
+
 }

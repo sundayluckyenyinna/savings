@@ -12,5 +12,5 @@ public class AccountBalanceRequestPayload
     private String accountNumber;
     private String requestId;
     private String hash;
-
+    private String imei;
 }

@@ -116,4 +116,41 @@ public class TargetSavings
     @Column(name = "contribution_count_for_month")
     private int contributionCountForMonth = 0;
 
+    @Override
+    public String toString() {
+        return "TargetSavings{" +
+                "id=" + id +
+                ", createdAt=" + createdAt +
+                ", accountNumber='" + accountNumber + '\'' +
+                ", goalName='" + goalName + '\'' +
+                ", targetAmount='" + targetAmount + '\'' +
+                ", tenorInMonth='" + tenorInMonth + '\'' +
+                ", frequency='" + frequency + '\'' +
+                ", savingsAmount='" + savingsAmount + '\'' +
+                ", interestRate='" + interestRate + '\'' +
+                ", startDate=" + startDate +
+                ", endDate=" + endDate +
+                ", terminationDate=" + terminationDate +
+                ", earliestTerminationDate=" + earliestTerminationDate +
+                ", terminatedBy='" + terminatedBy + '\'' +
+                ", milestoneAmount='" + milestoneAmount + '\'' +
+                ", milestonePercent='" + milestonePercent + '\'' +
+                ", timePeriod=" + timePeriod +
+                ", status='" + status + '\'' +
+                ", requestId='" + requestId + '\'' +
+                ", failureReason='" + failureReason + '\'' +
+                ", interestAccrued='" + interestAccrued + '\'' +
+                ", interestPaidAt=" + interestPaidAt +
+                ", interestPaid=" + interestPaid +
+                ", interestFailureReason='" + interestFailureReason + '\'' +
+                ", transRef='" + transRef + '\'' +
+                ", sms25PercentSend=" + sms25PercentSend +
+                ", sms50PercentSend=" + sms50PercentSend +
+                ", sms75PercentSend=" + sms75PercentSend +
+                ", sms100PercentSend=" + sms100PercentSend +
+                ", totalInterest='" + totalInterest + '\'' +
+                ", dailyInterest='" + dailyInterest + '\'' +
+                ", contributionCountForMonth=" + contributionCountForMonth +
+                '}';
+    }
 }

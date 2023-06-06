@@ -1,8 +1,6 @@
 package com.accionmfb.omnix.savings.target_saving.service;
 
 import com.accionmfb.omnix.savings.target_saving.constant.ResponseCodes;
-import com.accionmfb.omnix.savings.target_saving.constant.TargetSavingStatus;
-import com.accionmfb.omnix.savings.target_saving.constant.TargetSavingsFrequency;
 import com.accionmfb.omnix.savings.target_saving.dto.ErrorResponse;
 import com.accionmfb.omnix.savings.target_saving.dto.PayloadResponse;
 import com.accionmfb.omnix.savings.target_saving.dto.Response;
@@ -14,20 +12,16 @@ import com.accionmfb.omnix.savings.target_saving.payload.request.*;
 import com.accionmfb.omnix.savings.target_saving.payload.response.*;
 import com.accionmfb.omnix.savings.target_saving.repository.TargetSavingsRepository;
 import com.google.gson.Gson;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.util.Strings;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.ApplicationContext;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.scheduling.annotation.Async;
-import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
-
-import java.io.File;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
@@ -35,16 +29,15 @@ import java.util.stream.Collectors;
 import static com.accionmfb.omnix.savings.target_saving.constant.ResponseCodes.INSUFFICIENT_BALANCE;
 import static com.accionmfb.omnix.savings.target_saving.constant.ResponseCodes.SUCCESS_CODE;
 import static com.accionmfb.omnix.savings.target_saving.constant.TargetSavingStatus.*;
-import static com.accionmfb.omnix.savings.target_saving.constant.TargetSavingsFrequency.DAILY;
-import static com.accionmfb.omnix.savings.target_saving.constant.TargetSavingsFrequency.WEEKLY;
+import static com.accionmfb.omnix.savings.target_saving.constant.TargetSavingsFrequency.*;
 import static com.accionmfb.omnix.savings.target_saving.util.TargetSavingsUtils.clean;
 import static com.accionmfb.omnix.savings.target_saving.util.TargetSavingsUtils.generateRequestId;
 
 
+@Slf4j
 @Configuration
 @EnableScheduling
-@EnableAsync
-public class CronJobs
+public class TargetSavingsCronJobs
 {
     // Generate a token that will last forever.
     @Autowired
@@ -68,112 +61,81 @@ public class CronJobs
     @Autowired
     private NotificationService notificationService;
 
-    @Autowired
-    private ApplicationContext applicationContext;
-
-    @Bean(destroyMethod = "shutdown")
-    public Executor executorService(){
-        return Executors.newScheduledThreadPool(4);
-    }
 
 
-    /**
-     * The scheduler Job to handle the automatic execution of pending target saving goals.
-     * This scheduler job is triggered at every 24 hours the server is up and running every day.
-     */
-    @Async
-    @Scheduled(fixedDelay = 24 * 60 * 60 * 1000, initialDelay = 1000)
-    public void executeContributionAndSMSForAllDueSchedules()
-    {
+    @Scheduled(fixedDelay = 5 * 60 * 1000, initialDelay = 1000)
+    public void executeContributionAndSMSForAllDueSchedules() {
 
-        System.out.println("Scheduler starting...");
+        log.info("Scheduler starting...");
 
         String tokenString = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJncnVwcCIsInJvbGVzIjoiW0dSVVBQLCBMT0NBTF9GVU5EU19UUkFOU0ZFUiwgQUlSVElNRV9TRUxGLCBBSVJUSU1FX09USEVSUywgQ0FCTEVfVFZfU1VCU0NSSVBUSU9OLCBFTEVDVFJJQ0lUWV9CSUxMX1BBWU1FTlQsIFNNU19OT1RJRklDQVRJT04sIElOVEVSX0JBTktfRlVORFNfVFJBTlNGRVIsIEFDQ09VTlRfREVUQUlMUywgQUNDT1VOVF9CQUxBTkNFUywgTE9DQUxfRlVORFNfVFJBTlNGRVJfV0lUSF9DSEFSR0UsIEFDQ09VTlRfQkFMQU5DRSwgTklQX05BTUVfRU5RVUlSWV0iLCJhdXRoIjoibWsvdnQ2OVBXMUVVaEpTVUhnZE0rQT09IiwiQ2hhbm5lbCI6IkFHRU5DWSIsIklQIjoiMDowOjA6MDowOjA6MDoxIiwiaXNzIjoiQWNjaW9uIE1pY3JvZmluYW5jZSBCYW5rIiwiaWF0IjoxNjU5MzQ2NDMyLCJleHAiOjYyNTE0Mjg0NDAwfQ.Q6aeZeZtT6IeDNjFa5Sc7gAt0vKLqFjERPy02zS7aTg";
 
         genericService.generateLog("Target Savings Scheduler", tokenString, "Scheduler starting", "API Scheduler", "INFO", "Omnix Savings API scheduler");
 
-        // Create a queue to hold all schedules
-        List<List<TargetSavingSchedule>> queue = new ArrayList<>();
+        // Find all the target savings in the repository that are not terminated.
+        List<TargetSavings> targetSavingsList = targetSavingsRepository.findAllTargetSavingsNotTerminated();
 
-        // Find all the target savings in the repository that are not terminated
-        List<TargetSavings> targetSavingsList = targetSavingsRepository
-                .findAllTargetSavingsNotTerminated();
+        // Construct a map that associates each unique account number and the associated account details.
+        Map<String, AccountDetailsResponsePayload> accountDetailsMap = getAllCustomersAccountDetailsForTargetSavings(targetSavingsList, tokenString);
 
+        // Process each target saving record for SMS and then for automatic contribution debit.
         for (TargetSavings targetSavings : targetSavingsList) {
-            List<TargetSavingSchedule> scheduleList = targetSavingsRepository
-                    .findAllPendingAndFailedSchedulesByParent(targetSavings);
-            queue.add(scheduleList);
+            log.info("Executing of SMS and Contribution for Account Number: {}", targetSavings.getAccountNumber());
+            List<TargetSavingSchedule> scheduleList = targetSavingsRepository.findAllTargetSavingSchedulesByParent(targetSavings).stream()
+                            .filter(schedule -> schedule.getStatus().equalsIgnoreCase(PENDING.name()) || schedule.getStatus().equalsIgnoreCase(FAILED.name()))
+                            .collect(Collectors.toList());
+
+            executeSMSDue(scheduleList, accountDetailsMap, tokenString);                // SMS processing.
+            executeScheduleQueue(scheduleList, accountDetailsMap, tokenString);         // Contribution processing.
         }
 
-        // Get the map that maps the unique account numbers and the corresponding account details.
-        Map<String, AccountDetailsResponsePayload> accountDetailsMap =
-                getAllCustomersAccountDetailsForTargetSavings(targetSavingsList, tokenString);
+        try {
+            // Resolve target savings interest
+            log.info("Resolving target savings interest...");
+            resolveTargetSavingsInterest(targetSavingsList);
+        }catch (Exception ignored) {}
 
-        for (List<TargetSavingSchedule> individualScheduleList : queue) {
+        // Process automatic payout to the account numbers whose target savings are matured.
+        log.info("Executing automatic target savings payout...");
+        executeAutomaticTargetSavingsTerminationAndPayout(targetSavingsList, tokenString);
 
-            //Start a new thread for execution and wait for it to complete.
-            CompletableFuture
-                    .supplyAsync(() -> accountDetailsMap)
-                    .thenApply(map -> {
-                        System.out.println("Executing Automatic SMS notification push...");
-                        executeSMSDue(individualScheduleList, map, tokenString);
-                        return map;
-                    })
-                    .thenApply(map -> {
-                        System.out.println("Executing Automatic Schedules...");
-                        executeScheduleQueue(individualScheduleList, map, tokenString);
-                        return map;
-                    })
-                    .join(); // Wait for completion.
-        }
-
-        // Execute automatic payout.
-        try{
-            CompletableFuture
-                    .runAsync(() -> {
-                        System.out.println("Executing Automatic Payout...");
-                        executeAutomaticTargetSavingsTerminationAndPayout(targetSavingsList, tokenString);
-                    }).join();
-        }catch (Exception exception){
-            String errorMessage = exception.getMessage();
-            genericService.generateLog("Target savings automatic payout execution", tokenString, "Error while doing automatic payout: ".concat(errorMessage), "DEBUB", "SEVERE", "");
-        }
-
-        System.out.println("Scheduler done for today...");
+        log.info("End of scheduler...");
     }
 
-    
+
     private void
     executeSMSDue(List<TargetSavingSchedule> schedules, Map<String, AccountDetailsResponsePayload> map, String token) {
+
+        // Get the current date and time from Google. This is to ensure time integrity irrespective of local time settings.
+        LocalDate now = genericService.getCurrentDateTime().toLocalDate();
 
         // Only those schedules that are pending and SMS due should send SMS
         schedules = schedules.stream()
                 .filter(schedule -> !schedule.getTargetSavings().getFrequency().equalsIgnoreCase(DAILY.name())) // no sms for daily schedules.
                 .filter(schedule -> !schedule.isSmsDueSend()) // schedules that SMS is not yet sent.
                 .filter(schedule -> schedule.getStatus().equalsIgnoreCase(PENDING.name()))   // schedules that are still pending.
-                .filter(schedule -> schedule.getSmsDueDate().compareTo(LocalDate.now().minusDays(1)) > 0 &&
-                        schedule.getSmsDueDate().compareTo(LocalDate.now().plusDays(1)) < 0) // schedule that SMS due date is today.
+                .filter(schedule -> schedule.getSmsDueDate().isAfter(now.minusDays(1)) &&
+                        schedule.getSmsDueDate().isBefore(now.plusDays(1))) // schedule that SMS due date is today.
                 .collect(Collectors.toList());
+
+        log.info("Qualified due schedule for SMS: {}", schedules.stream().map(TargetSavingSchedule::toString).collect(Collectors.toList()));
 
                 schedules.forEach(schedule -> {
                     TargetSavings targetSavings = schedule.getTargetSavings();
 
                     // Get the customer's account details
-                    AccountDetailsResponsePayload accountDetails =
-                            getAccountDetailsForSchedule(schedule, map);
+                    AccountDetailsResponsePayload accountDetails = getAccountDetailsForSchedule(schedule, map);
 
                     String accountResponseCode = accountDetails.getResponseCode();
 
-                    if(!accountResponseCode
-                            .equalsIgnoreCase(SUCCESS_CODE.getResponseCode()))
-                    {
+                    if(!accountResponseCode.equalsIgnoreCase(SUCCESS_CODE.getResponseCode())) {
                         schedule.setSmsDueSend(false);
                         schedule.setFailureReason("Account details retrieval failure for SMS sending: "
                                 + accountDetails
                                 .getResponseMessage());
 
                         // Log out the error
-                        System.out.println("Response: " + gson.toJson(accountDetails));
+                        log.info("Response: " + gson.toJson(accountDetails));
                         targetSavingsRepository.updateTargetSavingSchedule(schedule);
                         return;
                     }
@@ -192,7 +154,7 @@ public class CronJobs
                     Response response = sendGoalSettingDueSMS(smsPayload);
 
                     // log out the SMS response details
-                    System.out.println("SMS: " + gson.toJson(response));
+                    log.info("SMS: " + gson.toJson(response));
                     if ( !response.getResponseCode().equalsIgnoreCase(SUCCESS_CODE.getResponseCode())){
                         schedule.setSmsDueSend(false);
                         schedule.setFailureReason("SMS failure due to: " + response
@@ -210,20 +172,28 @@ public class CronJobs
 
     private void
     executeScheduleQueue(List<TargetSavingSchedule> scheduleQueue, Map<String, AccountDetailsResponsePayload> map, String token) {
-        // Only those schedules that are PENDING and FAILED earlier to be executed.
-        scheduleQueue.stream()
-                .filter(schedule -> !schedule.getStatus().equalsIgnoreCase(TERMINATED.name())) // already terminated
-                .filter(schedule -> !schedule.getStatus().equalsIgnoreCase(SUCCESS.name())) // already executed
-                .filter(schedule -> !schedule.getStatus().equalsIgnoreCase(MISSED.name())) // already missed. The user will initiate the action
-                .filter(schedule -> schedule.getDueAt().compareTo(LocalDate.now()) <= 0) // schedules that are due
-                .forEachOrdered(schedule -> {
 
-                    schedule.setExecutedAt(LocalDate.now());
+        // Get the current date and time from Google. This is to ensure time integrity irrespective of local time settings.
+        LocalDateTime now = genericService.getCurrentDateTime();
+
+        // Only those schedules that are PENDING and FAILED earlier to be executed.
+        scheduleQueue = scheduleQueue.stream()
+                .filter(schedule -> schedule.getStatus().equalsIgnoreCase(PENDING.name()) ||
+                        schedule.getStatus().equalsIgnoreCase(FAILED.name()))
+                .filter(schedule -> schedule.getDueAt().isBefore(now.toLocalDate()) ||
+                        schedule.getDueAt().isEqual(now.toLocalDate()))
+                .collect(Collectors.toList());
+
+        log.info("Qualified due schedule for contribution: {}", scheduleQueue.stream().map(TargetSavingSchedule::toString).collect(Collectors.toList()));
+
+        scheduleQueue.forEach(schedule -> {
+
+                    schedule.setExecutedAt(now.toLocalDate());
 
                     Response response = executeFundsTransferForSchedule(schedule, map, token);
 
                     // Log out the funds transfer response details
-                    System.out.println("Funds transfer response: " + gson.toJson(response));
+                    log.info("Funds transfer response: " + gson.toJson(response));
 
                     String prefix = "Funds transfer failure: ";
 
@@ -234,8 +204,9 @@ public class CronJobs
                                 (FundsTransferResponsePayload)((PayloadResponse)response).getResponseData();
 
                         String customerMobile = fundsPayload.getMobileNumber();
-                        String transactionRef = fundsPayload.getTransRef();
+                        String transactionRef = fundsPayload.getT24TransRef();
                         schedule.setStatus(SUCCESS.name());
+                        schedule.setT24TransRef(transactionRef);
                         schedule.setFailureReason(Strings.EMPTY);
                         targetSavingsRepository.updateTargetSavingSchedule(schedule);
                         handleSuccessfulExecutionOfSchedule(schedule, customerMobile, transactionRef, token);
@@ -258,14 +229,33 @@ public class CronJobs
 
     }
 
+    public void resolveTargetSavingsInterest(List<TargetSavings> targetSavingsList){
 
-    /**
-     * This method runs in a scheduler job. It automatically executes the target savings that are due to be terminated.
-     * The termination condition is such that:
-     * 1) The due date of the target savings goal has expired.
-     * @param targetSavingsList: List<TargetSavings>
-     */
+        targetSavingsList.forEach(targetSavings -> {
+
+            // Calculate the total interest earned.
+            BigDecimal dailyInterest = new BigDecimal(targetSavings.getDailyInterest());
+            int totalExecutedSchedule = targetSavingsRepository.findAllSchedulesOfTargetSavingsByStatus(targetSavings, SUCCESS).size();
+            int times = getTimesByFrequency(targetSavings.getFrequency());
+            BigDecimal totalInterestEarned = dailyInterest.multiply(new BigDecimal(String.valueOf(times))).multiply(new BigDecimal(totalExecutedSchedule)).setScale(2, RoundingMode.CEILING);
+
+            // Check if the schedules are all done.
+            int totalScheduleExecutable = targetSavingsRepository.findAllTargetSavingSchedulesByParent(targetSavings).size();
+            if(totalExecutedSchedule == totalScheduleExecutable){
+                totalInterestEarned = new BigDecimal(targetSavings.getTotalInterest()).setScale(2, RoundingMode.CEILING);
+            }
+
+            // Update the target savings in the repository.
+            targetSavings.setInterestAccrued(totalInterestEarned.toString());
+            targetSavingsRepository.updateTargetSavings(targetSavings);
+
+        });
+    }
+
     private void executeAutomaticTargetSavingsTerminationAndPayout(List<TargetSavings> targetSavingsList, String token){
+
+        // Get the current date and time from Google. This is to ensure time integrity irrespective of local time settings.
+        LocalDate now = genericService.getCurrentDateTime().toLocalDate();
 
         // Get the map of the unique account numbers and their associated target savings.
         Map<String, List<TargetSavings>> mapList = this.getTargetSavingsListMap(targetSavingsList);
@@ -280,7 +270,7 @@ public class CronJobs
             targetSavings = targetSavings.stream()
                     .filter(targetSaving -> !targetSaving.getStatus().equalsIgnoreCase(TERMINATED.name()))  // Those savings not terminated.
                     .filter(targetSaving -> targetSavingsRepository.findAllPendingSchedulesOfTargetSavings(targetSaving).size() == 0) // no more pending schedules.
-                    .filter(targetSaving -> targetSaving.getEndDate().plusDays(1).compareTo(LocalDate.now()) < 0) // Those savings that are due.
+                    .filter(targetSaving -> targetSaving.getEndDate().isBefore(now)) // Those savings that are due.
                     .filter(targetSaving -> new BigDecimal(clean(targetSaving.getMilestoneAmount())).compareTo(BigDecimal.ONE) > 0) // those schedules that at least have a milestone amount.
                     .collect(Collectors.toList());
 
@@ -363,8 +353,9 @@ public class CronJobs
         targetSavings.setContributionCountForMonth(newContributionCount);
 
         // Calculate and set the interest after the contribution
-        double newInterestAccrued = newContributionCount * Double.parseDouble(targetSavings.getDailyInterest());
-        targetSavings.setInterestAccrued(String.valueOf(newInterestAccrued));
+        double oldInterest = Double.parseDouble(targetSavings.getInterestAccrued());
+        double newInterestAccrued = oldInterest + (getTimesByFrequency(targetSavings.getFrequency()) * Double.parseDouble(targetSavings.getDailyInterest()));
+        targetSavings.setInterestAccrued(new BigDecimal(String.valueOf(newInterestAccrued)).setScale(2, RoundingMode.CEILING).toString());
 
         // Update the milestone amount and percentage
         BigDecimal oldMilestoneAmount = new BigDecimal(clean(targetSavings.getMilestoneAmount()));
@@ -417,29 +408,6 @@ public class CronJobs
     private void handleSMS100PercentMilestone(TargetSavingSchedule schedule, String mobileNo, String token) {
         Response response = sendNotificationSMS(schedule, mobileNo, "100", token);
         handleScheduleAfterSMS(schedule, response, "100");
-
-        // Here we will send a request to the internal termination API
-        TargetSavingTerminationRequestPayload requestPayload =
-                new TargetSavingTerminationRequestPayload();
-
-        requestPayload.setGoalName(schedule.getTargetSavings().getGoalName());
-        requestPayload.setAccountNumber(schedule.getTargetSavings().getAccountNumber());
-        requestPayload.setRequestId(generateRequestId());
-        String hash = genericService.encryptPayloadToString(requestPayload, token);
-        requestPayload.setHash(hash);
-
-        Response response1 = terminateDueTargetSavings(requestPayload, token);
-
-        String responseCode = response1.getResponseCode();
-
-        if (!responseCode.equalsIgnoreCase(SUCCESS_CODE.getResponseCode())){
-            String prefix = "Termination failure: ";
-            TargetSavings targetSavings = schedule.getTargetSavings();
-            targetSavings.setFailureReason(prefix + response1.getResponseMessage());
-            targetSavings.setStatus(FAILED.name());
-            targetSavingsRepository.updateTargetSavings(targetSavings);
-        }
-
     }
 
     
@@ -498,12 +466,11 @@ public class CronJobs
         Response response;
 
         // send a request to the internal termination service
-        Response responsePayload = targetSavingsTerminateService
-                .processTargetSavingsTermination(requestPayload, token);
+        Response responsePayload = targetSavingsTerminateService.processTargetSavingsTermination(requestPayload, token);
 
         String responseCode = responsePayload.getResponseCode();
 
-        if(responsePayload instanceof ErrorResponse)
+        if(responsePayload instanceof ErrorResponse || !responseCode.equalsIgnoreCase(SUCCESS_CODE.getResponseCode()))
         {
             response = ErrorResponse.getInstance();
             response.setResponseCode(responseCode);
@@ -667,8 +634,7 @@ public class CronJobs
         // Call the FundsTransfer service
         String username = jwtTokenUtil.getUsernameFromToken(token);
         String requestId = genericService.generateTransRef("TCF");
-        String narration = schedule.getTargetSavings().getGoalName()
-                + "-CONTRIBUTION-" + schedule.getTargetSavings().getAccountNumber();
+        String narration = schedule.getTargetSavings().getGoalName() + "-CONTRIBUTION-" + schedule.getTargetSavings().getAccountNumber();
 
         // Create the fund transfer payload
         FundsTransferPayload fundsTransferPayload = new FundsTransferPayload();
@@ -690,8 +656,7 @@ public class CronJobs
         String requestJson = gson.toJson(fundsTransferPayload);
 
         // Call the funds transfer microservice.
-        FundsTransferResponsePayload fundsTransferResponsePayload = externalService
-                .getFundsTransferResponse(token, requestJson);
+        FundsTransferResponsePayload fundsTransferResponsePayload = externalService.getFundsTransferResponse(token, requestJson);
 
         String prefix = "Funds transfer failure: ";
 
@@ -726,7 +691,8 @@ public class CronJobs
 
     /**
      * The CompletableFuture to execute the missed goals and interest for those whose target savings
-     * were terminated.
+     * were terminated. This and other associated methods were written on demand in a bid to process all pending
+     * target savings. However, it is not part of the core job for target saving processing.
       */
     private void processOldSchedule(
             Map<String, AccountDetailsResponsePayload> map, String token
@@ -788,14 +754,14 @@ public class CronJobs
 
         // A placeholder to hold the total number of all the pending schedules remaining.
         int totalPendingScheduleRemaining = schedules.size();
-        System.out.println("Schedule size: " + totalPendingScheduleRemaining);
+        log.info("Schedule size: " + totalPendingScheduleRemaining);
 
         // Perform the execution of the schedule
         for(TargetSavingSchedule schedule : schedules){
             Response response = executeFundsTransferForSchedule(schedule, map, token);
 
             // Log out the funds transfer response details
-            System.out.println("Funds transfer response: " + gson.toJson(response));
+            log.info("Funds transfer response: " + gson.toJson(response));
 
             String prefix = "Funds transfer failure: ";
 
@@ -847,7 +813,7 @@ public class CronJobs
 
             Response response1 = terminateDueTargetSavings(requestPayload, token);
 
-            System.out.println("Termination stage: " + gson.toJson(response1));
+            log.info("Termination stage: " + gson.toJson(response1));
 
             String responseCode = response1.getResponseCode();
 
@@ -869,7 +835,7 @@ public class CronJobs
             accountNumbers.add(targetSavings.getAccountNumber());
         });
 
-        List<String> uniqueAccountNumbers = accountNumbers.stream().collect(Collectors.toList());
+        List<String> uniqueAccountNumbers = new ArrayList<>(accountNumbers);
 
         // For each of the unique account numbers, get all the target savings associated with it
         Map<String, List<TargetSavings>> result = new HashMap<>();
@@ -883,6 +849,19 @@ public class CronJobs
         return result;
     }
 
+    private int getTimesByFrequency(String frequency){
+        if(frequency.equalsIgnoreCase(DAILY.name())){
+            return 1;
+        }
+        else if(frequency.equalsIgnoreCase(WEEKLY.name())){
+            return 7;
+        }
+        else if(frequency.equalsIgnoreCase(MONTHLY.name())){
+            return 30;
+        }
+        return 0;
+
+    }
 
 }
 

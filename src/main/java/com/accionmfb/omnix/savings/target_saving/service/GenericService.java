@@ -4,6 +4,7 @@ import com.accionmfb.omnix.savings.target_saving.model.TargetSavings;
 import com.accionmfb.omnix.savings.target_saving.payload.request.*;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.concurrent.CompletableFuture;
 
 
@@ -64,4 +65,6 @@ public interface GenericService
             (TargetSavingsRequestPayload targetSavingsRequestPayload, String token);
 
     void generateLog(String app, String token, String logMessage, String logType, String logLevel, String requestId);
+
+    LocalDateTime getCurrentDateTime();
 }

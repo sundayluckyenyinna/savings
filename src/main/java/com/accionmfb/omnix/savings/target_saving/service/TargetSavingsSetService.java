@@ -11,6 +11,7 @@ import com.accionmfb.omnix.savings.target_saving.payload.request.FundsTransferPa
 import com.accionmfb.omnix.savings.target_saving.payload.request.TargetSavingsRequestPayload;
 import com.accionmfb.omnix.savings.target_saving.payload.response.*;
 import com.accionmfb.omnix.savings.target_saving.repository.TargetSavingsRepository;
+import com.accionmfb.omnix.savings.target_saving.util.TargetSavingsUtils;
 import com.google.gson.Gson;
 import org.apache.logging.log4j.util.Strings;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -87,64 +88,24 @@ public class TargetSavingsSetService
         // Check for errors and return to the client if there be any.
         Optional<ErrorResponse> errorResponses = this.handleAllErrors(requestPayload, token);
         if(errorResponses.isPresent()){
-            // Log the error
             genericService.generateLog("Target Savings Set Payload error", token, username + ": " + errorResponses.get().getResponseMessage(), "API Request", "DEBUG", requestPayload.getRequestId());
             return errorResponses.get();
         }
 
         // Create the target saving model from the request payload.
-        TargetSavings targetSavings =
-                createTargetSavingsModelFromTargetSavingsRequest(requestPayload);
+        TargetSavings targetSavings = createTargetSavingsModelFromTargetSavingsRequest(requestPayload);
 
-        // Asynchronously save the target saving goal and all schedules and execute first debit transfer
+        // Asynchronously save the target saving goal and all schedules.
         TargetSavings createdTargetSavings = targetSavingsRepository.saveTargetSavings(targetSavings);
+        this.createAllSchedulesForTargetSavings(createdTargetSavings);
 
-        try{
-           response = createAllSchedulesForTargetSavings(createdTargetSavings)
-                    .whenCompleteAsync((firstSchedule, error) -> {
-                        if(error != null)
-                            genericService.generateLog("Target Savings Set", token, error.getMessage(), "API Request", "DEBUG", requestPayload.getRequestId());
-                    })
-                    .thenApplyAsync((firstSchedule) ->
-                            executeFirstContribution
-                                    (firstSchedule, requestPayload.getMobileNumber(), token))
-                   .get().get();
-        }catch (Exception exception){
-            // Log the error
-            genericService.generateLog("Target Savings Set error", token, "Program error", "API Request", "DEBUG", requestPayload.getRequestId());
-            exception.printStackTrace();
-            response = ErrorResponse.getInstance();
-            response.setResponseCode(ResponseCodes.INTERNAL_SERVER_ERROR.getResponseCode());
-            response.setResponseMessage(exception.getMessage());
-            return response;
-        }
+        // Get the customer details.
+        CustomerDetailsResponsePayload customerDetails = externalService.getCustomerDetailsFromCustomerService(requestPayload, token);
 
-        // Check that the response is not an error. The first execution funds transfer must not fail.
-        if (response instanceof ErrorResponse){
-            // Log the error
-            genericService.generateLog("Target Savings Set", token, response.getResponseMessage(), "API Request", "DEBUG", requestPayload.getRequestId());
-            targetSavingsRepository.revertFromTargetSavingsSetup(createdTargetSavings);
-            return response;
-        }
+        // Create the target savings response payload.
+        TargetSavingsResponsePayload responsePayload = createTargetSavingsResponsePayload(Strings.EMPTY, createdTargetSavings, customerDetails);
 
-        // Now, the response is surely a payload response.
-        FundsTransferResponsePayload transferResponsePayload =
-                (FundsTransferResponsePayload) ((PayloadResponse)response).getResponseData();
-
-        String transactionRef = transferResponsePayload.getTransRef();
-
-        // Get the customer details
-        CustomerDetailsResponsePayload customerDetails = externalService
-                .getCustomerDetailsFromCustomerService(requestPayload, token);
-
-        // Get the currently saved target details
-        TargetSavings currentSavings = targetSavingsRepository
-                .findTargetSavingsByRequestId(requestPayload.getRequestId()).get();
-
-        // Create the target savings response payload
-        TargetSavingsResponsePayload responsePayload =
-                createTargetSavingsResponsePayload(transactionRef, currentSavings, customerDetails);
-
+        // Send response to client application.
         PayloadResponse res = PayloadResponse.getInstance();
         res.setResponseCode(responsePayload.getResponseCode());
         res.setResponseData(responsePayload);
@@ -152,13 +113,7 @@ public class TargetSavingsSetService
     }
 
 
-    public  TargetSavingsResponsePayload
-    createTargetSavingsResponsePayload(
-            String transactionRef,
-            TargetSavings targetSavings,
-            CustomerDetailsResponsePayload customerDetails
-    )
-    {
+    public  TargetSavingsResponsePayload createTargetSavingsResponsePayload(String transactionRef, TargetSavings targetSavings, CustomerDetailsResponsePayload customerDetails) {
         TargetSavingsResponsePayload responsePayload = new TargetSavingsResponsePayload();
         responsePayload.setId(targetSavings.getId().toString());
         responsePayload.setResponseCode(ResponseCodes.SUCCESS_CODE.getResponseCode());
@@ -174,7 +129,7 @@ public class TargetSavingsSetService
                 .join(" ", customerDetails.getLastName(), customerDetails.getOtherName()));
         responsePayload.setMilestoneAmount(targetSavings.getMilestoneAmount());
         responsePayload.setMilestonePercentage(targetSavings.getMilestonePercent());
-        responsePayload.setStatus(targetSavings.getStatus());
+        responsePayload.setStatus(targetSavings.getStatus().equalsIgnoreCase(TargetSavingStatus.SUCCESS.name()) ? ModelStatus.ACTIVE.name() : targetSavings.getStatus());
         responsePayload.setMobileNumber(customerDetails.getMobileNumber());
         responsePayload.setRefId(transactionRef);
         responsePayload.setTenorInMonths(targetSavings.getTenorInMonth());
@@ -183,7 +138,7 @@ public class TargetSavingsSetService
         responsePayload.setInterestRate(targetSavings.getInterestRate());
         responsePayload.setEarliestTerminationDate(targetSavings
                 .getEarliestTerminationDate().toString());
-
+        responsePayload.setInterest(TargetSavingsUtils.resolveTargetSavingsInterest(targetSavings.getInterestAccrued()));
         return responsePayload;
     }
 
@@ -201,8 +156,7 @@ public class TargetSavingsSetService
     }
 
     private boolean isUniqueRequestId(String requestId){
-        boolean isUniqueId = targetSavingsRepository.findTargetSavingsByRequestId(requestId).isEmpty();
-        return isUniqueId;
+        return targetSavingsRepository.findTargetSavingsByRequestId(requestId).isEmpty();
     }
 
     private String isCustomerExist(TargetSavingsRequestPayload requestPayload, String token){
@@ -260,8 +214,9 @@ public class TargetSavingsSetService
         AccountBalanceResponsePayload balanceResponsePayload =
                 externalService.getAccountBalanceFromAccountService(requestPayload, token);
 
+        System.out.println("Account balance Response: " + new Gson().toJson(balanceResponsePayload));
         String balanceString = clean(balanceResponsePayload.getAvailableBalance());
-
+        System.out.println("Cleaned balance: " + balanceString);
         if (balanceString == null)
             return false;
 
@@ -272,8 +227,9 @@ public class TargetSavingsSetService
     }
 
     private boolean isTargetSavingsAlreadyExisting(String goalName, String accountNumber){
-        return targetSavingsRepository.findTargetSavingsByGoalNameAndAccountNumber(goalName, accountNumber)
-                .isPresent();
+        Optional<TargetSavings> otargetSavings = targetSavingsRepository.findTargetSavingsByGoalNameAndAccountNumber(goalName, accountNumber);
+        TargetSavings targetSavings = otargetSavings.orElse(null);
+        return targetSavings != null && !targetSavings.getStatus().equalsIgnoreCase(TargetSavingStatus.TERMINATED.name());
     }
 
     // Utility methods
@@ -343,9 +299,7 @@ public class TargetSavingsSetService
                 .toString();
     }
 
-    private static LocalDate getDueDateOfScheduleByFrequencyAndPosition
-            (LocalDate startDate, String frequency, int position)
-    {
+    private static LocalDate getDueDateOfScheduleByFrequencyAndPosition(LocalDate startDate, String frequency, int position) {
         if(frequency.equalsIgnoreCase(TargetSavingsFrequency.DAILY.name())){
             if (position == 1)
                 return startDate;   // this schedule will not be affected by the scheduler. it will be done right away.
@@ -369,15 +323,12 @@ public class TargetSavingsSetService
     }
 
 
-    // Error handling
     /**
      * This method handles all the business logical errors that might occur from a request to set
      * the target saving. If there is a specific error, it returns it in an enclosed Optional object.
      * If there are no errors, it simply returns an empty Optional.
-     * @return
      */
-    Optional<ErrorResponse> handleAllErrors(TargetSavingsRequestPayload requestPayload, String token)
-    {
+    Optional<ErrorResponse> handleAllErrors(TargetSavingsRequestPayload requestPayload, String token) {
         ErrorResponse errorResponse = ErrorResponse.getInstance();
         errorResponse.setResponseCode(ResponseCodes.FAILED_MODEL.getResponseCode());
         String message;
@@ -404,8 +355,7 @@ public class TargetSavingsSetService
         }
 
         // Get the Account details
-        AccountDetailsResponsePayload accountDetails =
-                externalService.getAccountDetailsFromAccountService(requestPayload, token);
+        AccountDetailsResponsePayload accountDetails = externalService.getAccountDetailsFromAccountService(requestPayload, token);
 
         // Validate the start date.
         if(!isValidStartDate(requestPayload.getStartDate())){
@@ -415,11 +365,20 @@ public class TargetSavingsSetService
             return Optional.ofNullable(errorResponse);
         }
 
+        // Validate the start date is not later than 1 month.
+        LocalDateTime now = genericService.getCurrentDateTime();
+        int hour, minute, second;
+        hour = now.getHour(); minute = now.getMinute(); second = now.getSecond();
+        LocalDate localStartDate = LocalDate.parse(requestPayload.getStartDate());
+        LocalDateTime localStartDateTime = localStartDate.atTime(hour, minute, second);
+        if(now.plusMonths(1).isBefore(localStartDateTime)){
+            message = genericService.getMessageOfTargetSavings("late-start-day");
+            errorResponse.setResponseMessage(message);
+            return Optional.ofNullable(errorResponse);
+        }
+
         // Validate the savings amount
-        if (!isValidateSavingsAmountByFrequency(
-                requestPayload.getSavingsAmount(), requestPayload.getFrequency())
-        )
-        {
+        if (!isValidateSavingsAmountByFrequency(requestPayload.getSavingsAmount(), requestPayload.getFrequency())) {
             message = genericService
                     .getMessageOfTargetSavings("amount.required",
                             new String[]{requestPayload.getFrequency(),
@@ -456,7 +415,7 @@ public class TargetSavingsSetService
         }
 
         // Validate the type of the account. The account category should point to 'Save Brighta'.
-        if( !accountDetails.getCategory().equalsIgnoreCase(AccountProductType.SAVEBRIGHTA.categoryCode) ){
+        if( !accountDetails.getProductCode().equalsIgnoreCase(AccountProductType.SAVEBRIGHTA.productCode) ){
             message = genericService.getMessageOfAccount("notsavebrighta");
             errorResponse.setResponseMessage(message);
             Optional.ofNullable(errorResponse);
@@ -478,17 +437,9 @@ public class TargetSavingsSetService
         // Check that the target savings has not been saved by the same account number.
         if(isTargetSavingsAlreadyExisting(requestPayload.getGoalName(), requestPayload.getAccountNumber())){
             message = genericService.getMessageOfTargetSavings("exist",
-                    new String[]{requestPayload.getGoalName(), requestPayload.getAccountNumber()});
+                    new String[]{"'".concat(requestPayload.getGoalName()).concat("'"), requestPayload.getAccountNumber()});
             errorResponse.setResponseMessage(message);
             Optional.ofNullable(errorResponse);
-            return Optional.ofNullable(errorResponse);
-        }
-
-        // Validate that there is sufficient account balance to start the savings
-        if (!isAccountBalanceSufficient(requestPayload, token)) {
-            message = genericService.getMessageOfAccount("insufficientbalance",
-                    new String[]{requestPayload.getFrequency()});
-            errorResponse.setResponseMessage(message);
             return Optional.ofNullable(errorResponse);
         }
 
@@ -500,17 +451,23 @@ public class TargetSavingsSetService
     public TargetSavings
     createTargetSavingsModelFromTargetSavingsRequest(TargetSavingsRequestPayload requestPayload)
     {
+        double[] interestComponents = genericService.calculateInterestComponentsForTargetSavings(
+                clean(requestPayload.getSavingsAmount()),
+                getInterestRate(clean(requestPayload.getTenor())),
+                requestPayload.getFrequency(),
+                requestPayload.getTenor()
+        );
+
+        double dailyInterest = interestComponents[1];
+        double totalInterest = interestComponents[0];
+
         TargetSavings targetSavings = new TargetSavings();
         targetSavings.setCreatedAt(LocalDateTime.now());                        // createdAt
         targetSavings.setAccountNumber(requestPayload.getAccountNumber());      // accountNumber
         targetSavings.setFrequency(requestPayload.getFrequency());              // frequency
         targetSavings.setSavingsAmount(requestPayload.getSavingsAmount());      // savings amount
-        targetSavings.setEarliestTerminationDate(getEarliestTerminationDate(
-                LocalDate.parse(requestPayload.getStartDate()), requestPayload.getTenor()
-        ));
-        targetSavings.setEndDate(getEndDate(
-                LocalDate.parse(requestPayload.getStartDate()), requestPayload.getTenor())
-        );
+        targetSavings.setEarliestTerminationDate(getEarliestTerminationDate(LocalDate.parse(requestPayload.getStartDate()), requestPayload.getTenor()));
+        targetSavings.setEndDate(getEndDate(LocalDate.parse(requestPayload.getStartDate()), requestPayload.getTenor()));
         targetSavings.setGoalName(requestPayload.getGoalName());
         targetSavings.setInterestRate(getInterestRate(requestPayload.getTenor()));
         targetSavings.setInterestAccrued("0");
@@ -527,8 +484,8 @@ public class TargetSavingsSetService
         targetSavings.setTerminationDate(LocalDate.parse("1900-01-01"));
         targetSavings.setTimePeriod(genericService.getTimePeriod());
         targetSavings.setTransRef(Strings.EMPTY);
-        targetSavings.setTotalInterest("");
-        targetSavings.setDailyInterest("");
+        targetSavings.setTotalInterest(String.valueOf(totalInterest));
+        targetSavings.setDailyInterest(String.valueOf(dailyInterest));
 
         return targetSavings;
     }
@@ -546,14 +503,12 @@ public class TargetSavingsSetService
      * @param targetSavings
      * @return firstTargetSavingSchedule : TargetSavingSchedule.
      */
-    private CompletableFuture<TargetSavingSchedule>
-    createAllSchedulesForTargetSavings(TargetSavings targetSavings)
-    {
+    private void createAllSchedulesForTargetSavings(TargetSavings targetSavings) {
+
         // Get the total contribution times
         String frequency = targetSavings.getFrequency();
         String tenor = targetSavings.getTenorInMonth();
         int totalContributionTimes = getTotalContributionTimes(frequency, Integer.parseInt(tenor));
-
         TargetSavingSchedule firstSavingSchedule = null;
 
         // Create the schedule model table for all the contribution times.
@@ -580,8 +535,7 @@ public class TargetSavingsSetService
             targetSavingSchedule.setTargetSavings(targetSavings);
 
             // Persist the schedule.
-            TargetSavingSchedule currentSchedule =
-                    targetSavingsRepository.saveTargetSavingSchedule(targetSavingSchedule);
+            TargetSavingSchedule currentSchedule = targetSavingsRepository.saveTargetSavingSchedule(targetSavingSchedule);
 
             // Return the first schedule to be executed automatically.
             if( i == 1 ){
@@ -589,13 +543,11 @@ public class TargetSavingsSetService
             }
         }
 
-        return CompletableFuture.completedFuture(firstSavingSchedule);
     }
 
     // Execute first debit transfer contribution
-    private CompletableFuture<Response>
-    executeFirstContribution(TargetSavingSchedule schedule, String mobileNo, String token)
-    {
+    @Deprecated
+    private CompletableFuture<Response> executeFirstContribution(TargetSavingSchedule schedule, String mobileNo, String token, String imei) {
 
         String username = jwtTokenUtil.getUsernameFromToken(token);
         String requestId = genericService.generateTransRef("TCF");
@@ -616,6 +568,7 @@ public class TargetSavingsSetService
         fundsTransferPayload.setRequestId(genericService.generateTransRef("TS"));
         fundsTransferPayload.setToken(token);
         fundsTransferPayload.setNarration(narration);
+        fundsTransferPayload.setImei(imei);
         String hash = genericService.encryptFundTransferPayload(fundsTransferPayload, token);
         fundsTransferPayload.setHash(hash);
 
@@ -624,6 +577,8 @@ public class TargetSavingsSetService
         // Call the funds transfer microservice.
         FundsTransferResponsePayload fundsTransferResponsePayload = externalService
                 .getFundsTransferResponse(token, requestJson);
+
+        System.out.println("FT response: " + gson.toJson(fundsTransferResponsePayload));
 
         // Check that the service was even reached in the first place.
         String responseCode = fundsTransferResponsePayload.getResponseCode();
@@ -665,7 +620,7 @@ public class TargetSavingsSetService
 
         double[] interestComponents = genericService.calculateInterestComponentsForTargetSavings(
                         clean(parent.getSavingsAmount()),
-                getInterestRate(clean(parent.getTenorInMonth())),
+                        getInterestRate(clean(parent.getTenorInMonth())),
                         parent.getFrequency(),
                 parent.getTenorInMonth()
         );
@@ -687,6 +642,5 @@ public class TargetSavingsSetService
 
         return CompletableFuture.completedFuture(payloadResponse);
     }
-
 
 }

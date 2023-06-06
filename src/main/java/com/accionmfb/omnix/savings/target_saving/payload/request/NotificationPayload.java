@@ -33,4 +33,6 @@ public class NotificationPayload
     private String targetAmount;
     private String currentAmount;
     private String milestonePercent;
+    private String imei;
+
 }

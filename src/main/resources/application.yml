@@ -33,3 +33,9 @@ targetSavings:
     tenToTwelve: 10.0
   missed:
     graceInDays: 4
+
+transactionSavings:
+  poolAccount: NGN12700000012
+
+time:
+  url: https://timeapi.io/api/Time/current/zone/?timeZone=Africa/Lagos

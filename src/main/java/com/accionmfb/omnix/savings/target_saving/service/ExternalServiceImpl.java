@@ -6,6 +6,7 @@ import com.accionmfb.omnix.savings.target_saving.constant.ResponseCodes;
 import com.accionmfb.omnix.savings.target_saving.payload.request.*;
 import com.accionmfb.omnix.savings.target_saving.payload.response.*;
 import com.google.gson.Gson;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Service;
  */
 
 @Service
+@Slf4j
 public class ExternalServiceImpl implements ExternalService
 {
     @Autowired
@@ -75,6 +77,7 @@ public class ExternalServiceImpl implements ExternalService
             response.setResponseCode(ResponseCodes.INTERNAL_SERVER_ERROR.getResponseCode());
             String prefix = "Customer details failure: ";
             response.setResponseMessage(prefix + exception.getMessage());
+            log.info("Customer Details Failure Response: " + exception.getMessage());
             return response;
         }
 
@@ -88,6 +91,7 @@ public class ExternalServiceImpl implements ExternalService
             return customerDetailsResponsePayload;
         }
 
+        log.info("Customer Details retrieval response: {}", responseString);
         return gson.fromJson(responseString, CustomerDetailsResponsePayload.class);
     }
 
@@ -106,6 +110,7 @@ public class ExternalServiceImpl implements ExternalService
             response.setResponseCode(ResponseCodes.INTERNAL_SERVER_ERROR.getResponseCode());
             String prefix = "Customer details failure: ";
             response.setResponseMessage(prefix + exception.getMessage());
+            log.info("Customer Details Failure response: " + exception.getMessage());
             return response;
         }
 
@@ -118,6 +123,7 @@ public class ExternalServiceImpl implements ExternalService
             return customerDetailsResponsePayload;
         }
 
+        log.info("Customer Details retrieval response: {}", responseString);
         return gson.fromJson(responseString, CustomerDetailsResponsePayload.class);
     }
 
@@ -171,6 +177,7 @@ public class ExternalServiceImpl implements ExternalService
             responsePayload.setResponseCode(ResponseCodes.INTERNAL_SERVER_ERROR.getResponseCode());
             String prefix = "Account details retrieval failure: ";
             responsePayload.setResponseMessage(prefix + exception.getMessage());
+            log.info("Account details failure response: " + exception.getMessage());
             return responsePayload;
         }
 
@@ -182,6 +189,7 @@ public class ExternalServiceImpl implements ExternalService
             return responsePayload;
         }
 
+        log.info("Account details retrieval response: {}", responseString);
         responsePayload = gson.fromJson(responseString, AccountDetailsResponsePayload.class);
         return responsePayload;
     }
@@ -201,6 +209,7 @@ public class ExternalServiceImpl implements ExternalService
             responsePayload.setResponseCode(ResponseCodes.INTERNAL_SERVER_ERROR.getResponseCode());
             String prefix = "Account details retrieval failure: ";
             responsePayload.setResponseMessage(prefix + exception.getMessage());
+            log.info("Account details failure response: " + exception.getMessage());
             return responsePayload;
         }
 
@@ -212,6 +221,7 @@ public class ExternalServiceImpl implements ExternalService
             return responsePayload;
         }
 
+        log.info("Account details retrieval response: {}", responseString);
         responsePayload = gson.fromJson(responseString, AccountDetailsResponsePayload.class);
         return responsePayload;
     }
@@ -222,6 +232,7 @@ public class ExternalServiceImpl implements ExternalService
         AccountBalanceRequestPayload payload = genericService
                 .createAccountBalanceRequestPayloadFromTargetSavingsRequest(requestPayload, token);
 
+        System.out.println("Account balance request: " + new Gson().toJson(payload));
         String responseJson;
         try{
               responseJson = accountService.accountBalance(token, payload).getBody();
@@ -230,6 +241,8 @@ public class ExternalServiceImpl implements ExternalService
             response.setResponseCode(ResponseCodes.INTERNAL_SERVER_ERROR.getResponseCode());
             String prefix = "Account balance retrieval failure: ";
             response.setResponseMessage(prefix + exception.getMessage());
+            System.out.println("Account balance error response: " + exception.getMessage());
+            log.info("Account balance failure response: " + exception.getMessage());
             return response;
         }
 
@@ -242,6 +255,7 @@ public class ExternalServiceImpl implements ExternalService
             return responsePayload;
         }
 
+        log.info("Account Balance Retrieval ResponseJson: {}", responseJson);
         responsePayload = gson.fromJson(responseJson, AccountBalanceResponsePayload.class);
 
         return responsePayload;
@@ -262,6 +276,7 @@ public class ExternalServiceImpl implements ExternalService
             response.setResponseCode(ResponseCodes.INTERNAL_SERVER_ERROR.getResponseCode());
             String prefix = "Account balance retrieval failure: ";
             response.setResponseMessage(prefix + exception.getMessage());
+            log.info("Account balance failure response: " + exception.getMessage());
             return response;
         }
 
@@ -274,6 +289,7 @@ public class ExternalServiceImpl implements ExternalService
             return responsePayload;
         }
 
+        log.info("Account Balance Retrieval ResponseJson: {}", responseJson);
         responsePayload = gson.fromJson(responseJson, AccountBalanceResponsePayload.class);
 
         return responsePayload;
@@ -318,10 +334,12 @@ public class ExternalServiceImpl implements ExternalService
         try{
             fundsTransferResponse = fundsTransferService
                     .localTransfer(authToken, requestJson).getBody();
+            System.out.println("Feign FT response: " + fundsTransferResponse);
         }catch (Exception exception){
             result.setResponseCode(ResponseCodes.INTERNAL_SERVER_ERROR.getResponseCode());
             String prefix = "Funds transfer error: ";
             result.setResponseMessage(prefix + exception.getMessage());
+            log.info("Funds transfer failure response: " + exception.getMessage());
             return result;
         }
 
@@ -337,6 +355,7 @@ public class ExternalServiceImpl implements ExternalService
                 fundsTransferResponse, FundsTransferResponsePayload.class
         );
 
+        log.info("Funds transfer responseJson: {}", fundsTransferResponse);
         return responsePayload;
     }
 
@@ -356,6 +375,7 @@ public class ExternalServiceImpl implements ExternalService
             smsResponsePayload.setResponseCode(ResponseCodes.INTERNAL_SERVER_ERROR.getResponseCode());
             String prefix = "SMS notification failure: ";
             smsResponsePayload.setResponseMessage(prefix + exception.getMessage());
+            log.info("SMS failure response: " + exception.getMessage());
             return smsResponsePayload;
         }
 
@@ -387,6 +407,7 @@ public class ExternalServiceImpl implements ExternalService
              response.setResponseCode(ResponseCodes.INTERNAL_SERVER_ERROR.getResponseCode());
              String prefix = "Termination service failure: ";
              response.setResponseMessage(prefix + exception.getMessage());
+             log.info("Target savings termination failure response: " + exception.getMessage());
              return response;
          }
 
