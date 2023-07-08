@@ -17,4 +17,11 @@ public class ErrorResponse extends Response implements Serializable
     public ErrorResponse(String responseCode, String responseMessage){
         super(responseCode, responseMessage);
     }
+
+    public String toString() {
+        return "Response{" +
+                "responseCode='" + responseCode + '\'' +
+                ", responseMessage='" + responseMessage + '\'' +
+                '}';
+    }
 }

@@ -608,13 +608,13 @@ public class TargetSavingsSetService
         BigDecimal totalSavable = new BigDecimal(clean(schedule.getAmount()))
                 .multiply(new BigDecimal(getContributionCountPerMonth(parent.getFrequency())))
                 .multiply(new BigDecimal(clean(parent.getTenorInMonth())))
-                .setScale(5, RoundingMode.FLOOR);
+                .setScale(2, RoundingMode.FLOOR);
 
         BigDecimal firstSaved = new BigDecimal(clean(schedule.getAmount()));
         BigDecimal milestonePercent = firstSaved
                 .multiply(new BigDecimal("100"))
-                .divide(totalSavable, 5, RoundingMode.FLOOR)
-                .setScale(5, RoundingMode.FLOOR);
+                .divide(totalSavable, 2, RoundingMode.FLOOR)
+                .setScale(2, RoundingMode.FLOOR);
 
         parent.setMilestonePercent(milestonePercent.toString());
 

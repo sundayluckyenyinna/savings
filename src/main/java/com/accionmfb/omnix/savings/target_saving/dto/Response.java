@@ -21,4 +21,11 @@ public abstract class Response
         this.responseMessage = responseMessage;
     }
 
+    @Override
+    public String toString() {
+        return "Response{" +
+                "responseCode='" + responseCode + '\'' +
+                ", responseMessage='" + responseMessage + '\'' +
+                '}';
+    }
 }

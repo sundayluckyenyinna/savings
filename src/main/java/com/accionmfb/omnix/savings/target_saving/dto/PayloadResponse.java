@@ -26,4 +26,11 @@ public class PayloadResponse extends Response implements Serializable
     public void setResponseData(Object responseData) {
         this.responseData = responseData;
     }
+
+    public String toString() {
+        return "Response{" +
+                "responseCode='" + responseCode + '\'' +
+                ", responseMessage='" + responseMessage + '\'' +
+                '}';
+    }
 }

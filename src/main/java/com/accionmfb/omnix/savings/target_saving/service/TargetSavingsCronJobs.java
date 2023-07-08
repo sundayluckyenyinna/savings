@@ -92,8 +92,10 @@ public class TargetSavingsCronJobs
         try {
             // Resolve target savings interest
             log.info("Resolving target savings interest...");
-            resolveTargetSavingsInterest(targetSavingsList);
-        }catch (Exception ignored) {}
+            resolveTargetSavingsInterest(targetSavingsRepository.findAllTargetSavings());
+        }catch (Exception e) {
+            log.info("Error while resolving Interest and Stabilizing contribution: {}", e.getMessage());
+        }
 
         // Process automatic payout to the account numbers whose target savings are matured.
         log.info("Executing automatic target savings payout...");
@@ -200,8 +202,7 @@ public class TargetSavingsCronJobs
                     // If the operation succeeds, set the status of the target savings and handle success.
                     String responseCode = response.getResponseCode();
                     if(responseCode.equalsIgnoreCase(SUCCESS_CODE.getResponseCode())){
-                        FundsTransferResponsePayload fundsPayload =
-                                (FundsTransferResponsePayload)((PayloadResponse)response).getResponseData();
+                        FundsTransferResponsePayload fundsPayload = (FundsTransferResponsePayload)((PayloadResponse)response).getResponseData();
 
                         String customerMobile = fundsPayload.getMobileNumber();
                         String transactionRef = fundsPayload.getT24TransRef();
@@ -209,7 +210,8 @@ public class TargetSavingsCronJobs
                         schedule.setT24TransRef(transactionRef);
                         schedule.setFailureReason(Strings.EMPTY);
                         targetSavingsRepository.updateTargetSavingSchedule(schedule);
-                        handleSuccessfulExecutionOfSchedule(schedule, customerMobile, transactionRef, token);
+                        boolean isUpdateDone = handleSuccessfulExecutionOfSchedule(schedule, customerMobile, transactionRef, token);
+                        log.info("Update done: {}", isUpdateDone);
                     }
 
                     // If the operation fails due to insufficient balance, set the status of the target savings to MISSED.
@@ -239,6 +241,14 @@ public class TargetSavingsCronJobs
             int times = getTimesByFrequency(targetSavings.getFrequency());
             BigDecimal totalInterestEarned = dailyInterest.multiply(new BigDecimal(String.valueOf(times))).multiply(new BigDecimal(totalExecutedSchedule)).setScale(2, RoundingMode.CEILING);
 
+            // Calculate the milestone amount.
+            String savingsAmount = targetSavings.getSavingsAmount();
+            BigDecimal milestoneAmount = new BigDecimal(savingsAmount).multiply(new BigDecimal(totalExecutedSchedule)).setScale(2, RoundingMode.CEILING);
+
+            // Calculate the milestone percent.
+            String targetAmount = targetSavings.getTargetAmount();
+            BigDecimal milestonePercent = milestoneAmount.multiply(new BigDecimal(100)).divide(new BigDecimal(targetAmount), 2, RoundingMode.HALF_UP);
+
             // Check if the schedules are all done.
             int totalScheduleExecutable = targetSavingsRepository.findAllTargetSavingSchedulesByParent(targetSavings).size();
             if(totalExecutedSchedule == totalScheduleExecutable){
@@ -247,8 +257,11 @@ public class TargetSavingsCronJobs
 
             // Update the target savings in the repository.
             targetSavings.setInterestAccrued(totalInterestEarned.toString());
-            targetSavingsRepository.updateTargetSavings(targetSavings);
+            targetSavings.setMilestoneAmount(milestoneAmount.toString());
+            targetSavings.setMilestonePercent(milestonePercent.toString());
+            targetSavings.setContributionCountForMonth(totalExecutedSchedule);
 
+            TargetSavings updatedTargetSavings = targetSavingsRepository.updateTargetSavings(targetSavings);
         });
     }
 
@@ -344,7 +357,7 @@ public class TargetSavingsCronJobs
         return map.get(accountNumber);
     }
 
-    private void handleSuccessfulExecutionOfSchedule(TargetSavingSchedule schedule, String mobileNo, String transRef, String token) {
+    private boolean handleSuccessfulExecutionOfSchedule(TargetSavingSchedule schedule, String mobileNo, String transRef, String token) {
 
         // Get the parent target savings
         TargetSavings targetSavings = schedule.getTargetSavings();
@@ -359,14 +372,13 @@ public class TargetSavingsCronJobs
 
         // Update the milestone amount and percentage
         BigDecimal oldMilestoneAmount = new BigDecimal(clean(targetSavings.getMilestoneAmount()));
-        BigDecimal newMilestoneAmount = oldMilestoneAmount
-                .add(new BigDecimal(clean(schedule.getAmount())));
+        BigDecimal newMilestoneAmount = oldMilestoneAmount.add(new BigDecimal(clean(schedule.getAmount())));
 
         targetSavings.setMilestoneAmount(newMilestoneAmount.toString());
 
         BigDecimal newMilestonePercent = newMilestoneAmount
                 .multiply(new BigDecimal("100"))
-                .divide(new BigDecimal(clean(targetSavings.getTargetAmount())), 5, RoundingMode.CEILING);
+                .divide(new BigDecimal(clean(targetSavings.getTargetAmount())), 2, RoundingMode.HALF_UP);
         targetSavings.setMilestonePercent(newMilestonePercent.toString());
         targetSavings.setTransRef(transRef);
 
@@ -377,16 +389,17 @@ public class TargetSavingsCronJobs
         if(newMilestonePercent.doubleValue() >= 25 && !targetSavings.isSms25PercentSend()){
             handleSMS25PercentMilestone(schedule, mobileNo, token);
         }
-        if(newMilestonePercent.doubleValue() >= 50 && !targetSavings.isSms50PercentSend()){
+        else if(newMilestonePercent.doubleValue() >= 50 && !targetSavings.isSms50PercentSend()){
             handleSMS50PercentMilestone(schedule, mobileNo, token);
         }
-        if(newMilestonePercent.doubleValue() >= 75 && !targetSavings.isSms75PercentSend()){
+        else if(newMilestonePercent.doubleValue() >= 75 && !targetSavings.isSms75PercentSend()){
             handleSMS75PercentMilestone(schedule, mobileNo, token);
         }
-        if (newMilestonePercent.doubleValue() >= 100 && !targetSavings.isSms100PercentSend()) {
+        else if (newMilestonePercent.doubleValue() >= 100 && !targetSavings.isSms100PercentSend()) {
             handleSMS100PercentMilestone(schedule, mobileNo, token);
         }
 
+        return true;
     }
 
     private void handleSMS25PercentMilestone(TargetSavingSchedule schedule, String mobileNo, String token) {
@@ -421,26 +434,27 @@ public class TargetSavingsCronJobs
      * @param response : Response
      */
     private void handleScheduleAfterSMS(TargetSavingSchedule schedule, Response response, String percent) {
-        
+
+        log.info("SMS response: {}", response.toString());
         String prefix = "SMS failure: ";
         if (response instanceof ErrorResponse){
             String message = prefix + response.getResponseMessage();
             schedule.setFailureReason(message);
+        }else{
+            TargetSavings targetSavings = schedule.getTargetSavings();
+
+            if(percent.equalsIgnoreCase("25"))
+                targetSavings.setSms25PercentSend(true);
+            else if(percent.equalsIgnoreCase("50"))
+                targetSavings.setSms50PercentSend(true);
+            else if(percent.equalsIgnoreCase("75"))
+                targetSavings.setSms75PercentSend(true);
+            else if(percent.equalsIgnoreCase("100"))
+                targetSavings.setSms100PercentSend(true);
+
+            targetSavingsRepository.updateTargetSavings(targetSavings);
+            targetSavingsRepository.updateTargetSavingSchedule(schedule);
         }
-
-        TargetSavings targetSavings = schedule.getTargetSavings();
-
-        if(percent.equalsIgnoreCase("25"))
-            targetSavings.setSms25PercentSend(true);
-        else if(percent.equalsIgnoreCase("50"))
-            targetSavings.setSms50PercentSend(true);
-        else if(percent.equalsIgnoreCase("75"))
-            targetSavings.setSms75PercentSend(true);
-        else if(percent.equalsIgnoreCase("100"))
-            targetSavings.setSms100PercentSend(true);
-
-        targetSavingsRepository.updateTargetSavings(targetSavings);
-        targetSavingsRepository.updateTargetSavingSchedule(schedule);
     }
 
     private Response
@@ -505,8 +519,7 @@ public class TargetSavingsCronJobs
         SMSResponsePayload smsResponsePayload;
         String prefix;
                 try{
-                    smsResponsePayload= externalService
-                            .sendSMS(requestPayload.getToken(), smsRequest);
+                    smsResponsePayload= externalService.sendSMS(requestPayload.getToken(), smsRequest);
                 }catch (Exception exception){
                     prefix = "SMS notification failure: ";
                     response = ErrorResponse.getInstance();
@@ -585,8 +598,7 @@ public class TargetSavingsCronJobs
 
         SMSResponsePayload smsResponsePayload = new SMSResponsePayload();
         try{
-            smsResponsePayload = externalService
-                    .sendSMS(requestPayload.getToken(), smsRequest);
+            smsResponsePayload = externalService.sendSMS(requestPayload.getToken(), smsRequest);
         }catch (Exception exception){
             response = ErrorResponse.getInstance();
             String prefix = "SMS sending failure: ";
@@ -850,6 +862,7 @@ public class TargetSavingsCronJobs
     }
 
     private int getTimesByFrequency(String frequency){
+        frequency = frequency.toUpperCase();
         if(frequency.equalsIgnoreCase(DAILY.name())){
             return 1;
         }
@@ -860,7 +873,6 @@ public class TargetSavingsCronJobs
             return 30;
         }
         return 0;
-
     }
 
 }

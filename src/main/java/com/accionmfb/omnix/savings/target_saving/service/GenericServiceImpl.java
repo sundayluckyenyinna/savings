@@ -452,8 +452,6 @@ public class GenericServiceImpl implements GenericService
             response = httpResponse.getBody();
             CurrentDateTime currentDateTime = gson.fromJson(response, CurrentDateTime.class);
             LocalDateTime dateTime = LocalDateTime.parse(currentDateTime.getDateTime());
-            log.info("Google current time retrieval success: {}", currentDateTime.toString());
-            log.info("Time gotten: {}", dateTime.toString());
 
             return dateTime;
         }
